@@ -23,6 +23,18 @@ fn key_of(ctx: &mut Ctx, s: &str) -> String {
     ctx.expand_ex(s, true).trim_end_matches('\\').to_string()
 }
 
+/// Message for a registry change that failed (usually a key under HKLM without administrator rights).
+fn change_failed(ctx: &Ctx, text: &str) {
+    if sys::is_admin() {
+        ctx.msg(text);
+    } else {
+        ctx.msg(&format!(
+            "{} Administrator rights may be required. Please, set \"!admin = 1\" in the [GENERAL] section and try again.",
+            text
+        ));
+    }
+}
+
 /// "HKCU\Software\K\Value" -> ("HKCU\Software\K", "Value").
 fn split_value(path: &str) -> (String, String) {
     match path.rfind('\\') {
@@ -100,7 +112,9 @@ pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
 pub fn plus_regkey(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
-    reg::create_key(&k, view);
+    if !reg::create_key(&k, view) {
+        change_failed(ctx, &format!("The registry key \"{}\" could not be created.", k));
+    }
 }
 
 pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
@@ -115,7 +129,9 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 5));
     match reg::build_value(&kind, &data, &sep) {
         Some((t, bytes)) => {
-            reg::write_value(&key, &name, t, &bytes, view);
+            if !reg::write_value(&key, &name, t, &bytes, view) {
+                change_failed(ctx, &format!("The registry value \"{}\\{}\" could not be written.", key, name));
+            }
         }
         None => ctx.msg(&format!("The value \"{}\" can't be converted to the type \"{}\".", data, kind)),
     }
@@ -152,7 +168,7 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     let backup = format!("{}_backup", src);
     copy_key(&src, &backup, false, view);
     delete_key(&src, false, view);
-    import_file(&file, view);
+    import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: format!("{}\\", src), file, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: false, view });
     ctx.after_prog.push(Prog::LtrRegKey { src: backup, tgt: src.clone(), mv: true, view });
@@ -168,7 +184,7 @@ pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
     copy_value(&src, &backup, false, view);
-    import_file(&file, view);
+    import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: src.clone(), file, view });
     ctx.after_prog.push(Prog::MinusRegValue { key: k.clone(), name: v, view });
     ctx.after_prog.push(Prog::LtrRegValue { src: backup, tgt: src, mv: true, view });
@@ -222,9 +238,18 @@ fn reg_exe() -> String {
     sys::system32("reg.exe")
 }
 
-pub fn import_file(file: &str, view: View) {
+/// Imports a .reg file. `false` = reg.exe failed (a missing file is not a failure).
+pub fn import_file(file: &str, view: View) -> bool {
     if util::is_file(file) {
-        sys::run_hidden_wait(&reg_exe(), &["import", file, view.reg_exe_flag()]);
+        sys::run_hidden_wait(&reg_exe(), &["import", file, view.reg_exe_flag()])
+    } else {
+        true
+    }
+}
+
+fn import_or_warn(ctx: &Ctx, file: &str, view: View) {
+    if !import_file(file, view) {
+        change_failed(ctx, &format!("The registry file \"{}\" could not be imported.", file));
     }
 }
 
@@ -316,5 +341,5 @@ fn settings_reg_dirlike(ctx: &mut Ctx, a: &str) -> String {
 pub fn regimport_kw(ctx: &mut Ctx, args: &[String]) {
     let file = settings_reg(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
-    import_file(&file, view);
+    import_or_warn(ctx, &file, view);
 }

@@ -75,6 +75,32 @@ pub fn expand_env(s: &str) -> String {
     out
 }
 
+/// Names of the `%NAME%` tokens that are still in `s` after the shell folders and
+/// the environment variables were expanded, that is, the ones that are not defined.
+/// Text that does not look like a variable name (`%1`, `%~dp0`, `100% of 50%`) and the
+/// variables that cmd.exe expands only at run time (`%CD%`, `%DATE%`...) are ignored.
+pub fn undefined_env_names(s: &str) -> Vec<String> {
+    const CMD_DYNAMIC: &[&str] =
+        &["CD", "DATE", "TIME", "RANDOM", "ERRORLEVEL", "CMDEXTVERSION", "CMDCMDLINE", "HIGHESTNUMANODENUMBER"];
+    let mut found = Vec::new();
+    let mut rest = s;
+    while let Some(a) = rest.find('%') {
+        let after = &rest[a + 1..];
+        let Some(b) = after.find('%') else { break };
+        let name = &after[..b];
+        let looks_like_name = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && !name.ends_with(' ')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ' ' | '(' | ')' | '-' | '.'));
+        if looks_like_name && !CMD_DYNAMIC.iter().any(|d| d.eq_ignore_ascii_case(name)) {
+            found.push(name.to_string());
+            rest = &after[b + 1..];
+        } else {
+            rest = after;
+        }
+    }
+    found
+}
+
 fn lang_row() -> Option<(&'static str, &'static str)> {
     let code = sys::os_lang();
     LANGS.iter().find(|(c, _, _)| *c == code).map(|(_, n, d)| (*n, *d))
@@ -220,6 +246,12 @@ impl Ctx {
             }
         }
         s = expand_env(&s);
+        // NEW (gaP-rs): `%NAME%` that is neither a shell folder nor an environment variable is
+        // reported like an undefined `{VAR}` (before, it was silently kept as literal text).
+        if let Some(name) = undefined_env_names(&s).first() {
+            self.msg(&format!("The \"{}\" variable isn't defined and can't be used.", name));
+            return s;
+        }
         if reg_key {
             let first = s.split('\\').next().unwrap_or("").to_string();
             if first.len() > 2 && first.ends_with("64") {
@@ -257,5 +289,17 @@ mod tests {
     fn env() {
         std::env::set_var("GAPTEST", "ok");
         assert_eq!(expand_env("a%GAPTEST%b%NOPE_X%c"), "aokb%NOPE_X%c");
+    }
+
+    #[test]
+    fn undefined_env_tokens() {
+        assert_eq!(undefined_env_names(r"%Windows%\System32"), vec!["Windows"]);
+        assert_eq!(undefined_env_names(r"%ProgramFiles(x86)%\App"), vec!["ProgramFiles(x86)"]);
+        assert_eq!(undefined_env_names("%A% and %B%"), vec!["A", "B"]);
+        // not variables: batch parameters, percent signs in text, cmd.exe run-time variables
+        assert!(undefined_env_names("100% of 50%").is_empty());
+        assert!(undefined_env_names("/c echo %1 %~dp0 %CD% %errorlevel%").is_empty());
+        assert!(undefined_env_names("plain text").is_empty());
+        assert!(undefined_env_names(r#""C:\App\App.exe" "%1""#).is_empty());
     }
 }

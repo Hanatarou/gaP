@@ -323,3 +323,40 @@ pub fn type_name(kind: u32) -> &'static str {
 
 #[allow(dead_code)]
 pub const ERROR_OK: u32 = ERROR_SUCCESS;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn units(bytes: &[u8]) -> Vec<u16> {
+        bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+    }
+
+    /// `+regvalue` with REG_SZ writes the text exactly as typed: quotes, backslashes and `%1`
+    /// are kept (no `.reg`-style escaping), ended by a single terminating NUL.
+    #[test]
+    fn reg_sz_keeps_quotes_and_backslashes() {
+        let text = r#""C:\Program Files (x86)\MyApp\MyApp.exe" "%1""#;
+        let (kind, bytes) = build_value("REG_SZ", text, "").unwrap();
+        assert_eq!(kind, REG_SZ);
+        let u = units(&bytes);
+        assert_eq!(u.last(), Some(&0));
+        assert_eq!(String::from_utf16(&u[..u.len() - 1]).unwrap(), text);
+    }
+
+    #[test]
+    fn reg_expand_sz_keeps_percent_signs() {
+        let (kind, bytes) = build_value("REG_EXPAND_SZ", r"%SystemRoot%\System32", "").unwrap();
+        assert_eq!(kind, REG_EXPAND_SZ);
+        let u = units(&bytes);
+        assert_eq!(String::from_utf16(&u[..u.len() - 1]).unwrap(), r"%SystemRoot%\System32");
+    }
+
+    /// Binary data is written with the type REG_BINARY; "hex:" is `.reg` syntax, not gaP syntax.
+    #[test]
+    fn reg_binary_from_comma_separated_hex() {
+        let (kind, bytes) = build_value("REG_BINARY", "01,00,00", "").unwrap();
+        assert_eq!(kind, REG_BINARY);
+        assert_eq!(bytes, vec![1u8, 0, 0]);
+    }
+}
