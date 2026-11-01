@@ -1,0 +1,179 @@
+name: Build release
+
+# The program that is released is the smallest one: profile `release` (opt-level z, LTO, panic=abort, stripped) built
+# with a nightly Rust that rebuilds the standard library for size (-Z build-std) and drops the panic machinery
+# (-Cpanic=immediate-abort). The nightly is not pinned: every build uses the newest one.
+# The version in the name of the files is the tag of the release (v2.0.0.0). A release is refused if its tag is not the
+# version of Cargo.toml and of res/resources.rc.
+# Two Windows builds are made: 64-bit (x86_64-pc-windows-msvc) and 32-bit (i686-pc-windows-msvc). Both are built
+# on the same Windows runner. Clippy, the tests and the build of each architecture run side by side, so a run lasts
+# as long as the slowest of them.
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Building needs to read only. Attaching files to a release (the last job) is the only thing that writes.
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version for the names of the files
+        id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          cargo_ver=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          rc_ver=$(sed -n 's/.*VALUE "FileVersion", "\(.*\)".*/\1/p' res/resources.rc | head -n 1)
+          if [ "$EVENT" = "release" ]; then
+            tag="$RELEASE_TAG"
+            if [ "${tag#v}" != "$cargo_ver.0" ] || [ "${tag#v}" != "$rc_ver" ]; then
+              echo "::error::Tag $tag does not match Cargo.toml ($cargo_ver) and res/resources.rc ($rc_ver). Expected v$cargo_ver.0"
+              exit 1
+            fi
+          else
+            tag="v$cargo_ver.0"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  clippy:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, name: windows-x64 }
+          - { target: i686-pc-windows-msvc, name: windows-x86 }
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
+      - name: Windows Defender exclusions
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
+
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile minimal -c rust-src -c clippy --target ${{ matrix.target }} && rustup default nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-clippy
+
+      - name: Clippy
+        run: cargo clippy --release --all-targets --target ${{ matrix.target }} -- -D warnings
+
+  test:
+    # The 32-bit tests run on the 64-bit runner (Windows runs 32-bit programs natively).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, name: windows-x64 }
+          - { target: i686-pc-windows-msvc, name: windows-x86 }
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
+      - name: Windows Defender exclusions
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
+
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile minimal -c rust-src --target ${{ matrix.target }} && rustup default nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-test
+
+      - name: Test
+        run: cargo test --target ${{ matrix.target }} -- --test-threads=1
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, name: windows-x64 }
+          - { target: i686-pc-windows-msvc, name: windows-x86 }
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
+      - name: Windows Defender exclusions
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
+
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile minimal -c rust-src --target ${{ matrix.target }} && rustup default nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-build
+
+      # RUSTFLAGS makes Cargo ignore .cargo/config.toml, which is where +crt-static is: it is repeated here.
+      - name: Build
+        env:
+          RUSTFLAGS: -Zunstable-options -Cpanic=immediate-abort -C target-feature=+crt-static
+        run: >
+          cargo build --release --target ${{ matrix.target }}
+          -Z build-std=std,panic_abort -Z build-std-features=optimize_for_size
+
+      # The zip holds the executable and nothing else; the sha256 file stays outside the zip and is the one of the
+      # executable, not of the zip. The executable is called gaP.exe in both zips: gaP reads "<name of the exe>.ini",
+      # so the name matters.
+      - name: Package
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          out="gaP-$TAG-${{ matrix.name }}"
+          mkdir dist
+          cp "target/${{ matrix.target }}/release/gap.exe" "dist/gaP.exe"
+          cd dist
+          sha256sum "gaP.exe" > "../$out.exe.sha256.txt"
+          7z a "../$out.zip" "gaP.exe" >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaP-${{ matrix.name }}
+          path: gaP-${{ needs.version.outputs.tag }}-${{ matrix.name }}.*
+
+  publish:
+    if: github.event_name == 'release'
+    needs: [version, clippy, test, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: gh release upload "$TAG" dist/* --repo "$REPO" --clobber
