@@ -481,11 +481,11 @@ pub fn string_to_ansi(s: &str) -> Vec<u8> {
 
 pub fn decode_bytes(b: &[u8]) -> (String, Enc) {
     if b.starts_with(&[0xFF, 0xFE]) {
-        let u: Vec<u16> = b[2..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let u: Vec<u16> = b[2..].as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
         return (String::from_utf16_lossy(&u), Enc::Utf16Le);
     }
     if b.starts_with(&[0xFE, 0xFF]) {
-        let u: Vec<u16> = b[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let u: Vec<u16> = b[2..].as_chunks::<2>().0.iter().map(|&c| u16::from_be_bytes(c)).collect();
         return (String::from_utf16_lossy(&u), Enc::Utf16Be);
     }
     if b.starts_with(&[0xEF, 0xBB, 0xBF]) {

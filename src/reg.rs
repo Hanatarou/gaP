@@ -148,7 +148,7 @@ pub fn read_string(key: &str, name: &str, view: View) -> Option<String> {
     let v = read_value(key, name, view)?;
     match v.kind {
         REG_SZ | REG_EXPAND_SZ => {
-            let u: Vec<u16> = v.data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let u: Vec<u16> = v.data.as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
             Some(from_w(&u))
         }
         REG_DWORD if v.data.len() >= 4 => {
