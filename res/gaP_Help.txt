@@ -308,7 +308,11 @@ Examples:
 
 Notes:
 
-* Use an exclamation mark to exit if the specified version is not available.
+* Use an exclamation mark to exit if the specified version is not available;
+  and
+* The check follows the architecture of the main application: the 32-bit
+  .NET Framework for an x86 application and the 64-bit one for an x64
+  application (on a 64-bit Windows).
 
 [!java]
 Description:
@@ -327,7 +331,11 @@ Examples:
 
 Notes:
 
-* Use an exclamation mark to exit if the specified version is not available.
+* Use an exclamation mark to exit if the specified version is not available;
+  and
+* The check follows the architecture of the main application: the 32-bit
+  Java for an x86 application and the 64-bit Java for an x64 application
+  (on a 64-bit Windows).
 
 [!multiple]
 Description:
@@ -1573,6 +1581,11 @@ Q: Is there any directory structure convention to follow?
 A: No. gaP needs only the config file ("LauncherName.ini" or "gaP.ini") to be
    next to the launcher executable. Application and settings files can be anywhere.
 
+Q: How do I change from the x86 to the x64 build of gaP (or the other way)?
+A: Replace "gaP.exe" with the one of the other build and keep the same name:
+   the ini file has the same name and works with both builds. The main
+   application is chosen by the "application" key, not by the build of gaP.
+
 Q: How can I change "gaP.exe" icon?
 A: Use a 3rd party software like PE Icon Changer (#10) or Greenfish Icon Editor Pro (#11).
 
@@ -1619,7 +1632,7 @@ A: A registry operation could not be done and gaP is not running as
 1) http://rolandtoth.hu/yaP/
 2) http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=5698&start=0
 3) http://legroom.net/software/uniextract
-4) https://en.wikipedia.org/wiki/Environment_variable#Default_Values_on_Microsoft_Windows%3E
+4) https://en.wikipedia.org/wiki/Environment_variable
 5) http://www.portablefreeware.com/
 6) http://www.lupopensuite.com/
 7) http://portableapps.com/
