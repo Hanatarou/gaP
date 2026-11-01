@@ -1,4 +1,4 @@
-//! Palavras-chave de arquivos e diretórios:
+//! Keywords for files and directories:
 //! dir, file, (dir), (file), ->dir, <-dir, ->file, <-file, +dir, +file,
 //! -dir, -file, attributes, batch, date, keeponly, replace, replaceline,
 //! regmerge.
@@ -21,7 +21,7 @@ fn is_null(s: &str) -> bool {
     s == NULL
 }
 
-// ------------------------------------------------------------ proteções
+// ---------------------------------------------------------- protections
 
 fn norm_cmp(p: &str) -> String {
     util::trim_trailing_sep(p).to_lowercase()
@@ -32,16 +32,16 @@ fn is_inside(child: &str, parent: &str) -> bool {
     c == p || c.starts_with(&format!("{}\\", p))
 }
 
-/// Raiz de unidade ou ancestral do diretório do launcher: remoção bloquada.
+/// Drive root or ancestor of the launcher directory: removal blocked.
 fn dangerous_delete(ctx: &Ctx, path: &str) -> bool {
     let p = util::trim_trailing_sep(path);
     let is_root = p.len() <= 3 && p.ends_with([':', '\\']);
     is_root || is_inside(&ctx.script_dir, &p)
 }
 
-// --------------------------------------------------------- cópia / movimento
+// --------------------------------------------------------------- copy / move
 
-/// Núcleo de `->dir`/`<-dir` com caminhos já resolvidos.
+/// Core of `->dir`/`<-dir` with already resolved paths.
 pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
     if eq_ic(&norm_cmp(src), &norm_cmp(tgt)) || !util::is_dir(src) {
         return;
@@ -69,7 +69,7 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
     }
 }
 
-/// Núcleo de `->file`/`<-file` com caminhos de ARQUIVO resolvidos.
+/// Core of `->file`/`<-file` with resolved FILE paths.
 pub fn transfer_file(src: &str, tgt: &str, mv: bool, ow: bool) {
     if eq_ic(src, tgt) || !util::is_file(src) {
         return;
@@ -105,7 +105,7 @@ fn default_settings_dir(ctx: &Ctx) -> String {
     format!("{}\\Settings", ctx.script_dir.trim_end_matches('\\'))
 }
 
-/// `->dir` / `<-dir`. `rtl` inverte origem e destino.
+/// `->dir` / `<-dir`. `rtl` swaps source and destination.
 pub fn ltr_dir(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let (mut a, mut b) = (arg(args, 0).to_string(), arg(args, 1).to_string());
     if rtl {
@@ -118,7 +118,7 @@ pub fn ltr_dir(ctx: &mut Ctx, args: &[String], rtl: bool) {
     transfer_dir(ctx, &util::trim_trailing_sep(&src), &util::trim_trailing_sep(&tgt), mv, ow);
 }
 
-/// Descobre o arquivo de destino quando o usuário informou um diretório ou nada.
+/// Finds the destination file when the user gave a directory or nothing.
 fn resolve_file_target(ctx: &Ctx, src: &str, tgt: &str) -> String {
     let name = util::file_name(src);
     if tgt.ends_with('\\') || util::is_dir(tgt) || (!util::exists(tgt) && !util::has_extension(&util::file_name(tgt))) {
@@ -135,7 +135,7 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
     if rtl {
         std::mem::swap(&mut a, &mut b);
     }
-    // origem NULL + destino com extensão => origem = {GAPROOT}\<nome do destino>
+    // source NULL + destination with extension => source = {GAPROOT}\<destination name>
     if is_null(&a) && !is_null(&b) {
         let tmp = ctx.expand(&b);
         let n = util::file_name(&tmp);
@@ -154,7 +154,7 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
     transfer_file(&src, &tgt, mv, ow);
 }
 
-/// `dir = Origem [:: Destino]` (somente BEFORE).
+/// `dir = Source [:: Destination]` (BEFORE only).
 pub fn dir_kw(ctx: &mut Ctx, args: &[String]) {
     let src = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let tgt = if is_null(arg(args, 1)) { default_settings_dir(ctx) } else { full(ctx, arg(args, 1)) };
@@ -166,7 +166,7 @@ pub fn dir_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::LtrDir { src: backup, tgt: src, mv: true, ow: true });
 }
 
-/// `file = Origem [:: Destino]` (somente BEFORE).
+/// `file = Source [:: Destination]` (BEFORE only).
 pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
     let src = full(ctx, arg(args, 0));
     let settings = if is_null(arg(args, 1)) {
@@ -182,7 +182,7 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::LtrFile { src: backup, tgt: src, mv: true, ow: true });
 }
 
-/// `(dir) = Caminho`.
+/// `(dir) = Path`.
 pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let backup = format!("{}_backup", src);
@@ -190,7 +190,7 @@ pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::LtrDir { src: backup, tgt: src, mv: true, ow: true });
 }
 
-/// `(file) = Caminho`.
+/// `(file) = Path`.
 pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = full(ctx, arg(args, 0));
     let backup = format!("{}_backup", src);
@@ -198,7 +198,7 @@ pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::LtrFile { src: backup, tgt: src, mv: true, ow: true });
 }
 
-// ------------------------------------------------------------ criar / apagar
+// ----------------------------------------------------------- create / delete
 
 pub fn plus_dir(ctx: &mut Ctx, args: &[String]) {
     let d = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
@@ -222,7 +222,7 @@ pub fn plus_file(ctx: &mut Ctx, args: &[String]) {
     let go = eq_ic(&flag, "overwrite") || (eq_ic(&flag, "no overwrite") && !exists);
     if go {
         if exists {
-            let _ = std::fs::remove_file(&f); // recria (modo "erase")
+            let _ = std::fs::remove_file(&f); // recreates (mode "erase")
         }
         let enc = if util::ansi_to_string(&util::string_to_ansi(&text)) == text { Enc::Ansi } else { Enc::Utf8 };
         let _ = util::write_text(&f, &text, enc);
@@ -281,7 +281,7 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
             | FILE_ATTRIBUTE_HIDDEN
             | FILE_ATTRIBUTE_OFFLINE
             | FILE_ATTRIBUTE_TEMPORARY;
-        // "-RASHNOT": começa limpando tudo (também torna o arquivo gravável)
+        // "-RASHNOT": starts by clearing everything (also makes the file writable)
         SetFileAttributesW(wp.as_ptr(), cur & !managed);
         let mut bits = 0u32;
         let mut compress = false;
@@ -297,13 +297,13 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
                 _ => {}
             }
         }
-        // compressão NTFS (FSCTL_SET_COMPRESSION): sempre desliga, liga se pedido
+        // NTFS compression (FSCTL_SET_COMPRESSION): always turns off, turns on if requested
         let h = CreateFileW(
             wp.as_ptr(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, null(),
             OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, null_mut(),
         );
         if h != INVALID_HANDLE_VALUE {
-            // COMPRESSION_FORMAT_DEFAULT (1) liga; COMPRESSION_FORMAT_NONE (0) desliga.
+            // COMPRESSION_FORMAT_DEFAULT (1) turns on; COMPRESSION_FORMAT_NONE (0) turns off.
             let state: u16 = if compress { 1 } else { 0 };
             let mut ret = 0u32;
             DeviceIoControl(
@@ -347,14 +347,14 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
     let _ = c.status();
 }
 
-// -------------------------------------------------------------------- datas
+// -------------------------------------------------------------------- dates
 
 fn filetime_from_systemtime(t: SystemTime) -> u64 {
     let d = t.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
     d / 100 + 116_444_736_000_000_000
 }
 
-/// "YYYYMMDDHHMMSS" em hora local (formato de `FileGetTime(..., 1)`).
+/// "YYYYMMDDHHMMSS" in local time (format of `FileGetTime(..., 1)`).
 pub fn local_stamp(t: SystemTime) -> String {
     unsafe {
         let ft64 = filetime_from_systemtime(t);
@@ -494,7 +494,7 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
     }
 }
 
-// ------------------------------------------------------ texto em arquivos
+// ---------------------------------------------------------- text in files
 
 pub fn replace(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
@@ -528,7 +528,7 @@ pub fn replaceline(ctx: &mut Ctx, args: &[String]) {
     }
 }
 
-/// `regmerge`: anexa o 2º .reg ao 1º, removendo o cabeçalho duplicado.
+/// `regmerge`: appends the 2nd .reg to the 1st, removing the duplicate header.
 pub fn regmerge(ctx: &mut Ctx, args: &[String]) {
     let f1 = full(ctx, arg(args, 0));
     let f2 = full(ctx, arg(args, 1));

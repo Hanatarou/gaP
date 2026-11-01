@@ -1,10 +1,10 @@
-//! Criptografia de texto (`-crypt`) e hashes.
+//! Text encryption (`-crypt`) and hashes.
 //!
-//! Compatível com o formato do gaP em AutoIt, que usava `_Crypt_EncryptData`
-//! com AES-256: chave derivada de MD5(senha ANSI) via `CryptDeriveKey`
-//! (expansão ipad/opad do CryptoAPI), CBC, IV zero, padding PKCS#7, saída em
-//! hexadecimal maiúsculo com prefixo "0x" e delimitada por `!@@!`.
-//! Textos cifrados pelo gaP original continuam decifráveis.
+//! Compatible with the format of the AutoIt gaP, which used `_Crypt_EncryptData`
+//! with AES-256: key derived from MD5(ANSI password) through `CryptDeriveKey`
+//! (ipad/opad expansion of the CryptoAPI), CBC, zero IV, PKCS#7 padding, output as
+//! upper-case hexadecimal with the "0x" prefix and delimited by `!@@!`.
+//! Texts encrypted by the original gaP can still be decrypted.
 
 use aes::Aes256;
 use cipher::block_padding::Pkcs7;
@@ -53,7 +53,7 @@ pub fn from_hex(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// Cifra e devolve `!@@!0x…!@@!`.
+/// Encrypts and returns `!@@!0x…!@@!`.
 pub fn encrypt(text: &str, password: &str) -> String {
     let key = derive_key(password);
     let enc = cbc::Encryptor::<Aes256>::new((&key).into(), (&[0u8; 16]).into());
@@ -61,7 +61,7 @@ pub fn encrypt(text: &str, password: &str) -> String {
     format!("{}0x{}{}", MARK, to_hex(&ct), MARK)
 }
 
-/// Decifra `!@@!0x…!@@!` (ou só o hex). `None` = senha errada / dado inválido.
+/// Decrypts `!@@!0x…!@@!` (or just the hex). `None` = wrong password / invalid data.
 pub fn decrypt(data: &str, password: &str) -> Option<String> {
     let inner = data.replace(MARK, "");
     let ct = from_hex(&inner)?;
@@ -74,12 +74,12 @@ pub fn decrypt(data: &str, password: &str) -> Option<String> {
     Some(util::ansi_to_string(&pt))
 }
 
-/// SHA-1 em hexadecimal maiúsculo (como `_Crypt_HashData` sem "0x").
+/// SHA-1 as upper-case hexadecimal (like `_Crypt_HashData` without "0x").
 pub fn sha1_hex(data: &[u8]) -> String {
     to_hex(&Sha1::digest(data))
 }
 
-/// SHA-1 de um arquivo; "-1" se não existir (como o `HashFile` original).
+/// SHA-1 of a file; "-1" if it does not exist (like the original `HashFile`).
 pub fn sha1_file(path: &str) -> String {
     match std::fs::read(path) {
         Ok(b) => sha1_hex(&b),
@@ -93,10 +93,10 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let e = encrypt("Olá mundo 123", "segredo");
+        let e = encrypt("Hello, café 123", "secret");
         assert!(e.starts_with("!@@!0x") && e.ends_with("!@@!"));
-        assert_eq!(decrypt(&e, "segredo").as_deref(), Some("Olá mundo 123"));
-        assert!(decrypt(&e, "errada").is_none() || decrypt(&e, "errada").as_deref() != Some("Olá mundo 123"));
+        assert_eq!(decrypt(&e, "secret").as_deref(), Some("Hello, café 123"));
+        assert!(decrypt(&e, "wrong").is_none() || decrypt(&e, "wrong").as_deref() != Some("Hello, café 123"));
     }
 
     #[test]

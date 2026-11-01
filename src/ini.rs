@@ -1,13 +1,13 @@
-//! Leitura/escrita de arquivos INI (substitui IniRead, IniReadSection,
-//! IniWrite, IniDelete e as rotinas manuais de `iniread`/`iniwrite`).
+//! Reading/writing of INI files (replaces IniRead, IniReadSection,
+//! IniWrite, IniDelete and the manual `iniread`/`iniwrite` routines).
 //!
-//! O arquivo é manipulado como lista de linhas, preservando comentários,
-//! terminadores de linha e codificação (UTF-8/UTF-16/ANSI).
+//! The file is handled as a list of lines, preserving comments,
+//! line terminators and encoding (UTF-8/UTF-16/ANSI).
 
 use crate::util::{self, Enc};
 
 pub struct IniDoc {
-    pub lines: Vec<(String, String)>, // (conteúdo, terminador)
+    pub lines: Vec<(String, String)>, // (content, terminator)
     pub enc: Enc,
     pub existed: bool,
 }
@@ -25,7 +25,7 @@ fn is_comment(line: &str) -> bool {
     line.trim_start().starts_with(';')
 }
 
-/// Divide "chave = valor" (primeiro `=`), com trim em ambos.
+/// Splits "key = value" (first `=`), trimming both.
 fn kv(line: &str) -> Option<(String, String)> {
     if is_comment(line) || is_header(line).is_some() {
         return None;
@@ -38,7 +38,7 @@ fn kv(line: &str) -> Option<(String, String)> {
     Some((k.to_string(), line[i + 1..].trim().to_string()))
 }
 
-/// Remove aspas externas como faz GetPrivateProfileString (IniRead).
+/// Removes outer quotes as GetPrivateProfileString (IniRead) does.
 fn strip_quotes(v: &str) -> String {
     let b = v.as_bytes();
     if b.len() >= 2 && ((b[0] == b'"' && b[b.len() - 1] == b'"') || (b[0] == b'\'' && b[b.len() - 1] == b'\'')) {
@@ -65,8 +65,8 @@ impl IniDoc {
         util::write_text(path, &s, self.enc)
     }
 
-    /// Faixa [início, fim) de linhas de corpo da seção (`None` = área global,
-    /// antes da primeira seção). `Some(idx_cabecalho)` também é retornado.
+    /// Range [start, end) of the body lines of the section (`None` = global area,
+    /// before the first section). `Some(header_idx)` is also returned.
     fn section_range(&self, section: Option<&str>) -> Option<(usize, usize)> {
         match section {
             None => {
@@ -90,14 +90,14 @@ impl IniDoc {
         }
     }
 
-    /// IniReadSection: pares (chave, valor) em ordem, sem tratar aspas.
+    /// IniReadSection: (key, value) pairs in order, without handling quotes.
     pub fn section_pairs(&self, section: &str) -> Option<Vec<(String, String)>> {
         let (a, b) = self.section_range(Some(section))?;
         let v: Vec<_> = self.lines[a..b].iter().filter_map(|(l, _)| kv(l)).collect();
         Some(v)
     }
 
-    /// IniRead: primeiro valor da chave (aspas externas removidas).
+    /// IniRead: first value of the key (outer quotes removed).
     pub fn get(&self, section: Option<&str>, key: &str) -> Option<String> {
         let (a, b) = self.section_range(section)?;
         self.lines[a..b]
@@ -125,7 +125,7 @@ impl IniDoc {
         }
     }
 
-    /// IniWrite / escrita global.
+    /// IniWrite / global write.
     pub fn set(&mut self, section: Option<&str>, key: &str, value: &str) {
         let text = format!("{}={}", key, value);
         let eol = self.eol();
@@ -135,9 +135,9 @@ impl IniDoc {
         }
         match section {
             None => {
-                // Antes do original: inseria antes da primeira linha que não é
-                // comentário (e nada ocorria em arquivo vazio). Agora também
-                // funciona em arquivo vazio/só com comentários.
+                // The original inserted before the first line that is not a
+                // comment (and nothing happened in an empty file). It now also
+                // works in an empty file or one with only comments.
                 let (_, end) = self.section_range(None).unwrap();
                 let pos = self.lines[..end].iter().position(|(l, _)| !is_comment(l)).unwrap_or(end);
                 if pos >= self.lines.len() {
@@ -173,7 +173,7 @@ impl IniDoc {
         }
     }
 
-    /// IniDelete(chave). Retorna true se removeu.
+    /// IniDelete(key). Returns true if it removed something.
     pub fn delete_key(&mut self, section: Option<&str>, key: &str) -> bool {
         if let Some(i) = self.find_key(section, key) {
             self.lines.remove(i);
@@ -183,7 +183,7 @@ impl IniDoc {
         }
     }
 
-    /// Remove todas as chaves da área global (`--NULL`).
+    /// Removes all keys of the global area (`--NULL`).
     pub fn delete_global_keys(&mut self) {
         if let Some((a, b)) = self.section_range(None) {
             let mut i = b;
@@ -196,7 +196,7 @@ impl IniDoc {
         }
     }
 
-    /// IniDelete(seção inteira).
+    /// IniDelete(whole section).
     pub fn delete_section(&mut self, name: &str) -> bool {
         let mut start = None;
         for (i, (l, _)) in self.lines.iter().enumerate() {
@@ -224,7 +224,7 @@ impl IniDoc {
     }
 }
 
-/// Atalho: IniRead(arquivo, seção, chave, padrão).
+/// Shortcut: IniRead(file, section, key, default).
 pub fn read(path: &str, section: &str, key: &str, default: &str) -> String {
     IniDoc::load(path).get(Some(section), key).unwrap_or_else(|| default.to_string())
 }

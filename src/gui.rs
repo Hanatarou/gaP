@@ -1,13 +1,13 @@
-//! Janelas dos modos `-crypt`, `-license` e `-about` (Win32 puro).
+//! Windows of the `-crypt`, `-license` and `-about` modes (plain Win32).
 //!
-//! MELHORIAS em relação ao AutoIt:
-//!  * O módulo de criptografia reage a EN_CHANGE/CBN_SELCHANGE em vez de
-//!    consultar os campos a cada 100 ms (`While 1: Sleep(100): CryptChange()`),
-//!    o que mantinha a CPU acordada o tempo todo.
-//!  * Os textos-guia ("Write the password…") viram *cue banners* e não texto
-//!    real; no original eles eram cifrados como se fossem dados do usuário.
-//!  * O combo Encrypt/Decrypt é lista fechada (o original era editável e uma
-//!    digitação qualquer produzia saída vazia).
+//! IMPROVEMENTS over the AutoIt version:
+//!  * The encryption module reacts to EN_CHANGE/CBN_SELCHANGE instead of
+//!    polling the fields every 100 ms (`While 1: Sleep(100): CryptChange()`),
+//!    which kept the CPU awake all the time.
+//!  * The guide texts ("Write the password…") are *cue banners*, not real
+//!    text; in the original they were encrypted as if they were user data.
+//!  * The Encrypt/Decrypt combo is a closed list (the original was editable and any
+//!    typed value produced empty output).
 
 use std::cell::{Cell, RefCell};
 use std::ptr::{null, null_mut};
@@ -76,7 +76,7 @@ fn set_cue(h: HWND, text: &str) {
     }
 }
 
-/// `CloseGUI()`: limpa rastros e encerra.
+/// `CloseGUI()`: cleans traces and quits.
 fn close_gui() -> ! {
     clean::clean_all(SCRIPT_FULL.get().map(|s| s.as_str()).unwrap_or(""));
     std::process::exit(0)
@@ -112,7 +112,7 @@ unsafe extern "system" fn crypt_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
                 ID_PASS | ID_INPUT if code == EN_CHANGE_ => crypt_change(),
                 ID_COMBO if code == CBN_SELCHANGE_ => crypt_change(),
                 ID_COPY => {
-                    // O original relia o campo (CryptChange) e só copiava se não vazio.
+                    // The original re-read the field (CryptChange) and only copied if it was not empty.
                     crypt_change();
                     let t = get_text(OUTPUT.with(|c| c.get()));
                     if !t.is_empty() {
@@ -127,7 +127,7 @@ unsafe extern "system" fn crypt_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             let h = lp as HWND;
             let hdc = wp as HDC;
             if h == OUTPUT.with(|c| c.get()) {
-                SetBkColor(hdc, 0x00E1FFFF); // 0xFFFFE1 (RGB) em COLORREF
+                SetBkColor(hdc, 0x00E1FFFF); // 0xFFFFE1 (RGB) as COLORREF
                 return BRUSH_OUT.with(|b| b.get()) as LRESULT;
             }
             SetBkMode(hdc, TRANSPARENT as i32);
@@ -165,7 +165,7 @@ pub fn run_crypt(script_full: &str) -> ! {
             hwnd, "STATIC", "WARNING: This encryption module uses AES 256 bit algorithm to encrypt or decrypt your data. There is no perfect encryption available and gaP encryption and decryption module IS NOT an exception. However, choosing a strong password will make decoding very hard for the average computer user.\r\n\r\nWARNING: Even if you launch the main application with encrypted command line parameters, gaP will pass unencrypted data to the application which may be visible to other applications.",
             0, 0, 8, 110, 370, 144, -1,
         );
-        // Fonte 7 pt, negrito.
+        // Font 7 pt, bold.
         let hdc = GetDC(null_mut());
         let dpi = GetDeviceCaps(hdc, LOGPIXELSY as i32);
         ReleaseDC(null_mut(), hdc);
@@ -221,7 +221,7 @@ unsafe extern "system" fn license_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
             let dir = SCRIPT_DIR.get().cloned().unwrap_or_default();
             let path = format!("{}\\License.txt", dir.trim_end_matches('\\'));
             let text = LICENSE_TEXT.with(|t| t.borrow().clone());
-            // modo 42 do AutoIt = sobrescrever + criar pasta + UTF-16 LE com BOM
+            // AutoIt mode 42 = overwrite + create folder + UTF-16 LE with BOM
             if util::write_text(&path, &text, util::Enc::Utf16Le).is_err() {
                 ui::info(
                     &format!("License - {}", PROGRAM_NAME),
@@ -281,7 +281,7 @@ unsafe extern "system" fn about_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         WM_CTLCOLORSTATIC => {
             let hdc = wp as HDC;
             if lp as HWND == LINK.with(|c| c.get()) {
-                SetTextColor(hdc, 0x00C0_0000); // 0x0000C0 (RGB) em COLORREF
+                SetTextColor(hdc, 0x00C0_0000); // 0x0000C0 (RGB) as COLORREF
             }
             SetBkMode(hdc, TRANSPARENT as i32);
             return GetStockObject(WHITE_BRUSH) as LRESULT;
@@ -313,7 +313,7 @@ pub fn run_about(script_full: &str) -> ! {
         LINK.with(|c| c.set(link));
         let font = CreateFontW(-11, 0, 0, 0, 700, 0, 1, 0, 1, 0, 0, 0, 0, w("MS Sans Serif").as_ptr());
         SendMessageW(link, WM_SETFONT, font as WPARAM, 1);
-        // Logotipo 80x80 a partir do ícone embutido (o original usava um BMP).
+        // 80x80 logo from the embedded icon (the original used a BMP).
         let logo = make_ctrl(hwnd, "STATIC", "", SS_ICON as u32, 0, 300, 8, 80, 80, -1);
         // LoadIconWithScaleDown reduces the 256x256 image of the icon to 80x80 with smoothing; LoadImageW would
         // pick the 48x48 one and enlarge it (blurry). LoadImageW stays as the fallback.

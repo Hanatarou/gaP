@@ -1,6 +1,6 @@
-//! Seção [GENERAL]: aplicativo principal, linha de comando, pasta de trabalho
-//! e verificações iniciais (somente-leitura, instância única, administrador,
-//! .NET, Java, Internet, SO, depuração).
+//! [GENERAL] section: main application, command line, working directory
+//! and initial checks (read-only, single instance, administrator,
+//! .NET, Java, Internet, OS, debugging).
 
 use std::path::Path;
 
@@ -10,7 +10,7 @@ use crate::reg::{self, View};
 use crate::{crypto, ini, sys, ui, util};
 use util::{auto_num, eq_ic};
 
-/// IniRead(GENERAL, chave, padrão) já com macros expandidas.
+/// IniRead(GENERAL, key, default) with the macros already expanded.
 fn general(ctx: &mut Ctx, key: &str, default: &str) -> String {
     let raw = ini::read(&ctx.ini_path.clone(), "GENERAL", key, default);
     ctx.expand(&raw)
@@ -21,7 +21,7 @@ fn quit_clean(ctx: &Ctx) -> ! {
     exit_now()
 }
 
-// ---------------------------------------------------------------- somente leitura
+// ---------------------------------------------------------------------- read-only
 
 pub fn read_only_init(ctx: &mut Ctx) {
     let probe = format!("{}\\@#$readonly@#$", ctx.script_dir.trim_end_matches('\\'));
@@ -56,7 +56,7 @@ pub fn read_only_init(ctx: &mut Ctx) {
 // ----------------------------------------------------------------------- Java
 
 pub struct JavaInfo {
-    /// Versões principais instaladas ("6", "7", "8", "17"…).
+    /// Installed major versions ("6", "7", "8", "17"…).
     pub majors: Vec<u32>,
     pub exe: Option<String>,
 }
@@ -161,7 +161,7 @@ pub fn java_full(ctx: &mut Ctx) {
     }
 }
 
-// ----------------------------------------------------------- aplicativo principal
+// --------------------------------------------------------------- main application
 
 pub fn main_app_init(ctx: &mut Ctx) {
     let app = general(ctx, "application", "");
@@ -238,7 +238,7 @@ pub fn workdir_init(ctx: &mut Ctx) {
     ctx.add_var("WORKDIR", &dir);
 }
 
-// ---------------------------------------------------------- instância única
+// ---------------------------------------------------------- single instance
 
 pub fn gapnew_paths(ctx: &Ctx, pid: u32) -> (String, String) {
     let local = format!("{}\\@#$gapnew@#$", ctx.script_dir.trim_end_matches('\\'));
@@ -287,7 +287,7 @@ pub fn multiple_init(ctx: &mut Ctx) {
     }
 }
 
-// ------------------------------------------------------------------ depuração
+// ------------------------------------------------------------------ debugging
 
 pub fn debug_log_init(ctx: &mut Ctx) {
     let mut on = auto_num(&general(ctx, "!debug", "0")) == 1;
@@ -328,7 +328,7 @@ pub fn debug_log_init(ctx: &mut Ctx) {
     ctx.debug = Some(lg);
 }
 
-// -------------------------------------------------------------- administrador
+// -------------------------------------------------------------- administrator
 
 pub fn admin_init(ctx: &mut Ctx) {
     let v = general(ctx, "!admin", "");
@@ -339,7 +339,7 @@ pub fn admin_init(ctx: &mut Ctx) {
     match auto_num(&v) {
         -1 => exit_now(),
         1 => {
-            // Padrão do Windows: EnableLUA ausente = UAC ligado.
+            // Windows default: missing EnableLUA = UAC on.
             let lua = reg::read_dword(
                 "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
                 "EnableLUA",
@@ -439,7 +439,7 @@ pub fn is_online() -> bool {
     if sys::ping("www.google.com", 4000) || sys::ping("www.microsoft.com", 4000) {
         return true;
     }
-    // Redes que bloqueiam ICMP: tenta uma conexão TCP simples.
+    // Networks that block ICMP: try a plain TCP connection.
     sys::tcp_reachable("www.microsoft.com", 443, 4000) || sys::tcp_reachable("www.google.com", 443, 4000)
 }
 
@@ -476,7 +476,7 @@ pub fn online_init(ctx: &mut Ctx) {
     }
 }
 
-// ------------------------------------------------------------------------ SO
+// ------------------------------------------------------------------------ OS
 
 pub fn os_init(ctx: &mut Ctx) {
     let os = general(ctx, "!os", "");

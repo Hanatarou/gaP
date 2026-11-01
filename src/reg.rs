@@ -1,7 +1,7 @@
-//! Registro do Windows (API nativa). Substitui os `REG.EXE ADD/DELETE/COPY/QUERY`
-//! chamados via `cmd /C` no original (mais rápido e sem risco de injeção de
-//! comandos). Somente `REG EXPORT`/`REG IMPORT` continuam usando o reg.exe,
-//! para manter exatamente o formato dos arquivos .reg.
+//! Windows registry (native API). Replaces the `REG.EXE ADD/DELETE/COPY/QUERY`
+//! calls made through `cmd /C` in the original (faster and without risk of command
+//! injection). Only `REG EXPORT`/`REG IMPORT` still use reg.exe,
+//! to keep exactly the format of the .reg files.
 
 use std::ptr::{null, null_mut};
 
@@ -12,7 +12,7 @@ use crate::util::{from_w, w};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View {
-    /// Visão nativa do processo.
+    /// Native view of the process.
     Native,
     X86,
     X64,
@@ -41,7 +41,7 @@ impl View {
     }
 }
 
-/// "HKCU\Software\X" -> (HKEY raiz, "Software\X").
+/// "HKCU\Software\X" -> (root HKEY, "Software\X").
 pub fn parse(path: &str) -> Option<(HKEY, String)> {
     let p = path.trim().trim_start_matches('\\');
     let (root, sub) = match p.find('\\') {
@@ -91,7 +91,7 @@ fn create(root: HKEY, sub: &str, view: View) -> Option<Key> {
     }
 }
 
-/// 0 = não existe; 1 = existe com conteúdo; 2 = existe e está vazia.
+/// 0 = does not exist; 1 = exists with content; 2 = exists and is empty.
 pub fn key_state(path: &str, view: View) -> u8 {
     let Some((root, sub)) = parse(path) else { return 0 };
     let Some(k) = open(root, &sub, KEY_READ, view) else { return 0 };
@@ -143,7 +143,7 @@ pub fn value_exists(key: &str, name: &str, view: View) -> bool {
     read_value(key, name, view).is_some()
 }
 
-/// Valor REG_SZ/EXPAND_SZ como texto (para versões, Shell Folders, etc.).
+/// REG_SZ/EXPAND_SZ value as text (for versions, Shell Folders, etc.).
 pub fn read_string(key: &str, name: &str, view: View) -> Option<String> {
     let v = read_value(key, name, view)?;
     match v.kind {
@@ -184,7 +184,7 @@ pub fn create_key(path: &str, view: View) -> bool {
     create(root, &sub, view).is_some()
 }
 
-/// Apaga a chave e toda a sua subárvore.
+/// Deletes the key and its whole subtree.
 pub fn delete_tree(path: &str, view: View) -> bool {
     let Some((root, sub)) = parse(path) else { return false };
     if sub.is_empty() {
@@ -195,7 +195,7 @@ pub fn delete_tree(path: &str, view: View) -> bool {
         None => (String::new(), sub.clone()),
     };
     let pk = if parent.is_empty() {
-        // chave de primeiro nível: abre a própria raiz com a visão desejada
+        // top-level key: opens the root itself with the desired view
         let mut h: HKEY = null_mut();
         let r = unsafe { RegOpenKeyExW(root, null(), 0, KEY_ALL_ACCESS | view.sam(), &mut h) };
         if r == 0 { Some(Key(h)) } else { None }
@@ -206,7 +206,7 @@ pub fn delete_tree(path: &str, view: View) -> bool {
     unsafe { RegDeleteTreeW(pk.0, w(&name).as_ptr()) == 0 }
 }
 
-/// Copia valores e subchaves de `src` para `dst` (REG COPY /s /f).
+/// Copies values and subkeys from `src` to `dst` (REG COPY /s /f).
 pub fn copy_tree(src: &str, dst: &str, view: View) -> bool {
     let (Some((sr, ss)), Some((dr, ds))) = (parse(src), parse(dst)) else { return false };
     let Some(sk) = open(sr, &ss, KEY_READ, view) else { return false };
@@ -234,8 +234,8 @@ pub fn enum_subkeys(path: &str, view: View) -> Vec<String> {
     out
 }
 
-/// Remove chaves-pai vazias abaixo de HKCU\Software / HKLM\Software
-/// (conforme descrito na ajuda; o original só removia a própria chave).
+/// Removes empty parent keys below HKCU\Software / HKLM\Software
+/// (as described in the help; the original removed only the key itself).
 pub fn delete_empty_parents(path: &str, view: View) {
     let Some((root, sub)) = parse(path) else { return };
     if root != HKEY_CURRENT_USER && root != HKEY_LOCAL_MACHINE {
@@ -246,7 +246,7 @@ pub fn delete_empty_parents(path: &str, view: View) {
     if parts.is_empty() || !crate::util::eq_ic(parts[0], "Software") {
         return;
     }
-    // parts = ["Software", "Vendor", "App"]; começa pelo pai direto de "App".
+    // parts = ["Software", "Vendor", "App"]; starts at the direct parent of "App".
     parts.pop();
     while parts.len() > 1 {
         let p = format!("{}\\{}", rootname, parts.join("\\"));
@@ -259,7 +259,7 @@ pub fn delete_empty_parents(path: &str, view: View) {
     }
 }
 
-/// Converte o texto do `+regvalue` para (tipo, bytes).
+/// Converts the text of `+regvalue` into (type, bytes).
 pub fn build_value(kind_name: &str, data: &str, sep: &str) -> Option<(u32, Vec<u8>)> {
     let k = kind_name.to_ascii_uppercase();
     let utf16z = |s: &str| -> Vec<u8> {

@@ -1,6 +1,5 @@
-//! gaP: great! another Portabilizer — porte para Rust do programa em AutoIt
-//! (v2.0.0.0; a última versão em AutoIt foi a 1.1.5.0). Veja CHANGES.md para o mapa
-//! AutoIt -> Rust e a lista de correções/melhorias.
+//! gaP: great! another Portabilizer — Rust port of the AutoIt program
+//! (v2.0.0.0; the last AutoIt version was 1.1.5.0).
 #![windows_subsystem = "windows"]
 #![allow(clippy::too_many_arguments)]
 
@@ -39,7 +38,7 @@ fn main() {
         gui::run_about(&ctx.script_full);
     } else if eq_ic(&cmd, "-help") {
         sys::reduce_memory();
-        // FileInstall(..., flag 0): não sobrescreve.
+        // FileInstall(..., flag 0): does not overwrite.
         let p = format!("{}\\gaP_Help.txt", ctx.script_dir.trim_end_matches('\\'));
         if !std::path::Path::new(&p).exists() {
             let _ = std::fs::write(&p, HELP_TXT);
@@ -51,7 +50,7 @@ fn main() {
     launcher(&mut ctx);
 }
 
-/// Fluxo normal (`Case Else` do Switch original).
+/// Normal flow (`Case Else` of the original Switch).
 fn launcher(ctx: &mut Ctx) {
     sys::reduce_memory();
     checks::read_only_init(ctx);
@@ -78,7 +77,7 @@ fn launcher(ctx: &mut Ctx) {
             && ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?")
             && std::fs::write(&ctx.ini_path, INI_TEMPLATE).is_err()
         {
-            // MELHORIA: o original ignorava a falha ao criar o .ini.
+            // IMPROVEMENT: the original ignored the failure to create the .ini.
             ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name));
         }
         clean::clean_all(&ctx.script_full);
@@ -121,7 +120,7 @@ fn main_command_line(ctx: &Ctx) -> String {
 fn start_main(ctx: &Ctx) {
     let cl = main_command_line(ctx);
     if let Err(e) = sys::launch(&cl, &ctx.main_workdir, ctx.show_state, false) {
-        // MELHORIA: o original ignorava o retorno de Run().
+        // IMPROVEMENT: the original ignored the return value of Run().
         ctx.msg(&format!(
             "The main application \"{}\" could not be started (error {}).",
             ctx.main_app.clone().unwrap_or_default(),
@@ -130,7 +129,7 @@ fn start_main(ctx: &Ctx) {
     }
 }
 
-/// Lê (e consome) o arquivo `@#$gapnew@#$` deixado por outra instância.
+/// Reads (and consumes) the `@#$gapnew@#$` file left by another instance.
 fn take_new_cmdline(path: &str, remove_dir: bool) -> Option<String> {
     if !std::path::Path::new(path).is_file() {
         return None;

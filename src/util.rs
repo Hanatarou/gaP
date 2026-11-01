@@ -1,8 +1,8 @@
-//! Utilidades gerais: strings largas, caminhos, curingas, E/S de texto com
-//! detecção de codificação, cópia/remoção robusta de arquivos e datas.
+//! General utilities: wide strings, paths, wildcards, text I/O with
+//! encoding detection, robust file copy/removal and dates.
 //!
-//! Substitui os helpers do AutoIt: `_PathFull`, `_PathSplit`, `FileExists`
-//! (com curingas), `_FileListToArray`, `FileRead*`, `DirCopy`, `DirMove`,
+//! Replaces the AutoIt helpers: `_PathFull`, `_PathSplit`, `FileExists`
+//! (with wildcards), `_FileListToArray`, `FileRead*`, `DirCopy`, `DirMove`,
 //! `DirRemove`, `_ReplaceStringInFile`, etc.
 
 use std::fs;
@@ -16,18 +16,18 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 // ---------------------------------------------------------------- strings
 
-/// `&str` -> UTF-16 terminado em zero.
+/// `&str` -> zero-terminated UTF-16.
 pub fn w(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// UTF-16 (até o primeiro zero) -> `String`.
+/// UTF-16 (up to the first zero) -> `String`.
 pub fn from_w(buf: &[u16]) -> String {
     let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16_lossy(&buf[..n])
 }
 
-/// Comparação case-insensitive (o `=` do AutoIt entre strings).
+/// Case-insensitive comparison (the AutoIt `=` between strings).
 pub fn eq_ic(a: &str, b: &str) -> bool {
     let mut x = a.chars().flat_map(|c| c.to_lowercase());
     let mut y = b.chars().flat_map(|c| c.to_lowercase());
@@ -44,7 +44,7 @@ fn lc(c: char) -> char {
     c.to_lowercase().next().unwrap_or(c)
 }
 
-/// `StringInStr(hay, needle)` case-insensitive: posição (em chars) ou None.
+/// Case-insensitive `StringInStr(hay, needle)`: position (in chars) or None.
 pub fn find_ic(hay: &str, needle: &str) -> Option<usize> {
     if needle.is_empty() {
         return None;
@@ -67,7 +67,7 @@ pub fn starts_with_ic(hay: &str, prefix: &str) -> bool {
     h.len() >= p.len() && h[..p.len()] == p[..]
 }
 
-/// `StringReplace(s, find, rep, 0, 0)`: substitui todas, ignorando maiúsculas.
+/// `StringReplace(s, find, rep, 0, 0)`: replaces all, ignoring case.
 pub fn replace_all_ic(s: &str, find: &str, rep: &str) -> String {
     if find.is_empty() {
         return s.to_string();
@@ -89,7 +89,7 @@ pub fn replace_all_ic(s: &str, find: &str, rep: &str) -> String {
     out
 }
 
-/// Conversão numérica estilo AutoIt: vazio/não numérico = 0.
+/// AutoIt-style numeric conversion: empty/non-numeric = 0.
 pub fn auto_num(s: &str) -> i64 {
     let t = s.trim();
     let b = t.as_bytes();
@@ -107,19 +107,19 @@ pub fn auto_num(s: &str) -> i64 {
     t[..end].parse::<i64>().unwrap_or(0)
 }
 
-/// Segmentos "a :: b :: c" (StringSplit com delimitador inteiro " :: ").
+/// Segments "a :: b :: c" (StringSplit with the whole " :: " delimiter).
 pub fn split_args(s: &str) -> Vec<String> {
     s.split(" :: ").map(|x| x.to_string()).collect()
 }
 
-// ---------------------------------------------------------------- caminhos
+// ------------------------------------------------------------------- paths
 
 fn is_sep(c: char) -> bool {
     c == '\\' || c == '/'
 }
 
-/// Equivalente a `_PathFull($p, $base)`: resolve relativo a `base`, normaliza
-/// `.`/`..` e barras. Não toca o disco.
+/// Equivalent to `_PathFull($p, $base)`: resolves relative to `base`, normalizes
+/// `.`/`..` and slashes. Does not touch the disk.
 pub fn path_full(p: &str, base: &str) -> String {
     let p = p.trim();
     let norm = p.replace('/', "\\");
@@ -173,14 +173,14 @@ pub fn path_full(p: &str, base: &str) -> String {
     if stack.is_empty() || trailing {
         out.push('\\');
     }
-    // "C:\Dir\" -> mantém a barra final apenas se o original tinha
+    // "C:\Dir\" -> keeps the trailing slash only if the original had it
     if !trailing && stack.is_empty() {
-        // raiz da unidade
+        // drive root
     }
     out
 }
 
-/// Remove UMA barra final (não a raiz "C:\").
+/// Removes ONE trailing slash (not the "C:\" root).
 pub fn trim_trailing_sep(p: &str) -> String {
     if p.ends_with('\\') && p.len() > 3 {
         p[..p.len() - 1].to_string()
@@ -189,7 +189,7 @@ pub fn trim_trailing_sep(p: &str) -> String {
     }
 }
 
-/// (diretório pai, nome) de um caminho já normalizado.
+/// (parent directory, name) of an already normalized path.
 pub fn split_parent(p: &str) -> (String, String) {
     let t = trim_trailing_sep(p);
     match t.rfind('\\') {
@@ -198,12 +198,12 @@ pub fn split_parent(p: &str) -> (String, String) {
     }
 }
 
-/// Último componente do caminho.
+/// Last component of the path.
 pub fn file_name(p: &str) -> String {
     split_parent(p).1
 }
 
-/// Diretório pai com a barra final preservada para raízes ("C:" -> "C:\").
+/// Parent directory with the trailing slash preserved for roots ("C:" -> "C:\").
 pub fn parent_dir(p: &str) -> String {
     let (mut par, _) = split_parent(p);
     if par.len() == 2 && par.ends_with(':') {
@@ -223,7 +223,7 @@ pub fn has_wildcard(s: &str) -> bool {
     s.contains('*') || s.contains('?')
 }
 
-/// Curinga estilo Windows (`*` e `?`), sem diferenciar maiúsculas.
+/// Windows-style wildcard (`*` and `?`), case-insensitive.
 pub fn wildcard_match(pat: &str, name: &str) -> bool {
     let p: Vec<char> = pat.chars().map(lc).collect();
     let n: Vec<char> = name.chars().map(lc).collect();
@@ -258,8 +258,8 @@ pub enum Kind {
     Both,
 }
 
-/// `_FileListToArray($dir, $filter, $flag, True)`: caminhos completos.
-/// `filter` aceita vários padrões separados por `;`.
+/// `_FileListToArray($dir, $filter, $flag, True)`: full paths.
+/// `filter` accepts several patterns separated by `;`.
 pub fn list_dir(dir: &str, filter: &str, kind: Kind) -> Vec<String> {
     let pats: Vec<&str> = filter.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
     let pats = if pats.is_empty() { vec!["*"] } else { pats };
@@ -282,7 +282,7 @@ pub fn list_dir(dir: &str, filter: &str, kind: Kind) -> Vec<String> {
     out
 }
 
-/// `FileExists` do AutoIt: aceita curingas no último componente.
+/// AutoIt `FileExists`: accepts wildcards in the last component.
 pub fn exists(p: &str) -> bool {
     if p.is_empty() {
         return false;
@@ -302,7 +302,7 @@ pub fn is_file(p: &str) -> bool {
     Path::new(p).is_file()
 }
 
-// ---------------------------------------------------------------- arquivos
+// ------------------------------------------------------------------- files
 
 fn clear_readonly(p: &str) {
     unsafe {
@@ -314,7 +314,7 @@ fn clear_readonly(p: &str) {
     }
 }
 
-/// `FileDelete`: apaga arquivo(s), com curingas; remove atributo somente-leitura.
+/// `FileDelete`: deletes file(s), with wildcards; removes the read-only attribute.
 pub fn delete_files(p: &str) {
     if has_wildcard(p) {
         let (par, name) = split_parent(p);
@@ -328,7 +328,7 @@ pub fn delete_files(p: &str) {
     }
 }
 
-/// `DirRemove($d, 1)`: remoção recursiva tolerante a somente-leitura.
+/// `DirRemove($d, 1)`: recursive removal tolerant of read-only.
 pub fn remove_dir_recursive(p: &str) -> bool {
     if !Path::new(p).exists() {
         return false;
@@ -352,12 +352,12 @@ pub fn remove_dir_recursive(p: &str) -> bool {
     fs::remove_dir_all(p).is_ok()
 }
 
-/// `DirRemove($d, 0)`: só remove se vazio.
+/// `DirRemove($d, 0)`: only removes if empty.
 pub fn remove_dir_if_empty(p: &str) -> bool {
     fs::remove_dir(p).is_ok()
 }
 
-/// `DirCopy`: copia o conteúdo mesclando; sem sobrescrever se `overwrite` = false.
+/// `DirCopy`: copies the content merging; does not overwrite if `overwrite` = false.
 pub fn copy_dir(src: &Path, dst: &Path, overwrite: bool) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for e in fs::read_dir(src)? {
@@ -377,7 +377,7 @@ pub fn copy_dir(src: &Path, dst: &Path, overwrite: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// Move diretório (rename, ou copia+apaga entre volumes).
+/// Moves a directory (rename, or copy+delete across volumes).
 pub fn move_dir(src: &str, dst: &str) -> io::Result<()> {
     if let Some(par) = Path::new(dst).parent() {
         let _ = fs::create_dir_all(par);
@@ -395,7 +395,7 @@ pub fn move_dir(src: &str, dst: &str) -> io::Result<()> {
     }
 }
 
-/// `FileCopy(…, 8|1)`: cria a estrutura de destino; sobrescreve se pedido.
+/// `FileCopy(…, 8|1)`: creates the destination structure; overwrites if requested.
 pub fn copy_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
     if !overwrite && Path::new(dst).exists() {
         return Ok(());
@@ -431,7 +431,7 @@ pub fn move_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
     }
 }
 
-// ------------------------------------------------------- texto e codificação
+// --------------------------------------------------------- text and encoding
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Enc {
@@ -523,7 +523,7 @@ pub fn encode_string(s: &str, enc: Enc) -> Vec<u8> {
     }
 }
 
-/// Lê um arquivo de texto detectando a codificação.
+/// Reads a text file detecting the encoding.
 pub fn read_text(path: &str) -> Option<(String, Enc)> {
     fs::read(path).ok().map(|b| decode_bytes(&b))
 }
@@ -537,7 +537,7 @@ pub fn write_text(path: &str, s: &str, enc: Enc) -> io::Result<()> {
     fs::write(path, encode_string(s, enc))
 }
 
-/// Divide em linhas preservando o terminador de cada uma.
+/// Splits into lines preserving the terminator of each one.
 pub fn split_lines_keep(s: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -562,7 +562,7 @@ pub fn split_lines_keep(s: &str) -> Vec<(String, String)> {
     out
 }
 
-// -------------------------------------------------------------------- datas
+// -------------------------------------------------------------------- dates
 
 #[derive(Clone, Copy, Debug)]
 pub struct LocalTime {
@@ -590,8 +590,8 @@ pub fn local_now() -> LocalTime {
     }
 }
 
-/// Segundos desde 1970-01-01 00:00:00 UTC (corrige o `{U}` do original, que
-/// usava a hora local).
+/// Seconds since 1970-01-01 00:00:00 UTC (fixes the `{U}` of the original, which
+/// used local time).
 pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

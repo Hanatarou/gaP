@@ -1,4 +1,4 @@
-//! Limpeza de rastros no registro: "MuiCache" e "App Paths"
+//! Cleaning of registry traces: "MuiCache" and "App Paths"
 //! (`CleanMUICache` / `CleanAppPaths` / keyword `clean`).
 
 use std::sync::Mutex;
@@ -7,7 +7,7 @@ use crate::{reg, sys, util};
 
 static MAIN_APP: Mutex<Option<String>> = Mutex::new(None);
 
-/// Registra o aplicativo principal (equivale a `IsDeclared("MainApp")`).
+/// Registers the main application (same as `IsDeclared("MainApp")`).
 pub fn set_main_app(p: &str) {
     if let Ok(mut g) = MAIN_APP.lock() {
         *g = Some(p.to_string());
@@ -28,8 +28,8 @@ fn mui_key() -> &'static str {
 
 fn clean_mui_one(path: &str) {
     let key = mui_key();
-    // O original removia só o valor "<caminho>"; o Windows moderno também grava
-    // "<caminho>.FriendlyAppName" e "<caminho>.ApplicationCompany".
+    // The original removed only the "<path>" value; modern Windows also writes
+    // "<path>.FriendlyAppName" and "<path>.ApplicationCompany".
     for suffix in ["", ".FriendlyAppName", ".ApplicationCompany"] {
         let name = format!("{}{}", path, suffix);
         if reg::value_exists(key, &name, reg::View::Native) {
@@ -59,7 +59,7 @@ fn clean_app_paths_one(path: &str) {
     }
 }
 
-/// Limpeza automática: o próprio gaP e (se já conhecido) o aplicativo principal.
+/// Automatic cleaning: gaP itself and (if already known) the main application.
 pub fn clean_all(script_full: &str) {
     clean_mui_one(script_full);
     clean_app_paths_one(script_full);
@@ -69,7 +69,7 @@ pub fn clean_all(script_full: &str) {
     }
 }
 
-/// Keyword `clean = <exe>`: somente o executável indicado.
+/// Keyword `clean = <exe>`: only the given executable.
 pub fn clean_file(path: &str) {
     clean_mui_one(path);
     clean_app_paths_one(path);

@@ -1,5 +1,5 @@
-//! Serviços de sistema: arquitetura/versão do SO, administrador, processos,
-//! instância única, janelas, ping, idioma e pastas do shell.
+//! System services: OS architecture/version, administrator, processes,
+//! single instance, windows, ping, language and shell folders.
 
 use std::ptr::{null, null_mut};
 
@@ -18,16 +18,16 @@ use windows_sys::Win32::System::Environment::GetCommandLineW;
 
 use crate::util::{from_w, w};
 
-// ------------------------------------------------------------- SO / versão
+// ------------------------------------------------------------ OS / version
 
-/// Arquitetura do SO hospedeiro (não do processo): "x86" ou "x64".
+/// Architecture of the host OS (not of the process): "x86" or "x64".
 pub fn os_arch() -> &'static str {
     unsafe {
         let mut si: SYSTEM_INFO = std::mem::zeroed();
         GetNativeSystemInfo(&mut si);
         match si.Anonymous.Anonymous.wProcessorArchitecture {
             PROCESSOR_ARCHITECTURE_INTEL => "x86",
-            _ => "x64", // AMD64, ARM64 (emulação x64) e demais
+            _ => "x64", // AMD64, ARM64 (x64 emulation) and others
         }
     }
 }
@@ -47,8 +47,8 @@ extern "system" {
     fn RtlGetVersion(info: *mut OsVersionInfoW) -> i32;
 }
 
-/// (major, minor, build) reais. O original lia `CurrentVersion` do registro,
-/// que no Windows 10/11 continua "6.3".
+/// Real (major, minor, build). The original read `CurrentVersion` from the registry,
+/// which on Windows 10/11 is still "6.3".
 pub fn os_version() -> (u32, u32, u32) {
     unsafe {
         let mut v: OsVersionInfoW = std::mem::zeroed();
@@ -58,7 +58,7 @@ pub fn os_version() -> (u32, u32, u32) {
     }
 }
 
-/// Nome legível, usado no cabeçalho do log de depuração.
+/// Readable name, used in the header of the debug log.
 pub fn os_name() -> String {
     let (ma, mi, b) = os_version();
     let n = match (ma, mi) {
@@ -91,7 +91,7 @@ pub fn is_admin() -> bool {
     }
 }
 
-/// Reinicia este executável com o verbo "runas". true = o lançamento foi aceito.
+/// Restarts this executable with the "runas" verb. true = the launch was accepted.
 pub fn relaunch_elevated(exe: &str, params: &str, dir: &str) -> bool {
     unsafe {
         let r = ShellExecuteW(
@@ -109,7 +109,7 @@ pub fn reduce_memory() {
     }
 }
 
-/// Linha de comando bruta depois do nome do programa (`$CmdLineRaw`).
+/// Raw command line after the program name (`$CmdLineRaw`).
 pub fn cmdline_raw() -> String {
     unsafe {
         let p = GetCommandLineW();
@@ -137,7 +137,7 @@ pub fn cmdline_raw() -> String {
     }
 }
 
-// ---------------------------------------------------------------- processos
+// ---------------------------------------------------------------- processes
 
 pub struct ProcInfo {
     #[allow(dead_code)]
@@ -181,8 +181,8 @@ unsafe fn creation_time(h: HANDLE) -> u64 {
     }
 }
 
-/// Processos-filho vivos do processo atual (`_WinAPI_EnumChildProcess`).
-/// Ignora PIDs reaproveitados (filhos "criados antes" de nós) e já encerrados.
+/// Live child processes of the current process (`_WinAPI_EnumChildProcess`).
+/// Ignores reused PIDs (children "created before" us) and already terminated ones.
 pub fn live_children() -> Vec<u32> {
     let me = unsafe { GetCurrentProcessId() };
     let my_start = unsafe { creation_time(GetCurrentProcess()) };
@@ -194,7 +194,7 @@ pub fn live_children() -> Vec<u32> {
         unsafe {
             let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, p.pid);
             if h.is_null() {
-                // sem acesso: assume vivo se está listado
+                // no access: assumes alive if listed
                 v.push(p.pid);
                 continue;
             }
@@ -210,8 +210,8 @@ pub fn live_children() -> Vec<u32> {
     v
 }
 
-/// ProcessClose por prefixo do nome (case-insensitive; `*` final opcional).
-/// Nunca encerra o próprio gaP.
+/// ProcessClose by name prefix (case-insensitive; optional trailing `*`).
+/// Never terminates gaP itself.
 pub fn kill_by_prefix(pattern: &str) -> usize {
     let pat = pattern.trim_end_matches('*');
     let me = unsafe { GetCurrentProcessId() };
@@ -237,7 +237,7 @@ pub struct Launched {
     pub pid: u32,
 }
 
-/// Run/RunWait. `cmdline` já contém o executável entre aspas e os argumentos.
+/// Run/RunWait. `cmdline` already contains the quoted executable and the arguments.
 pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<Launched, u32> {
     unsafe {
         let mut si: STARTUPINFOW = std::mem::zeroed();
@@ -263,7 +263,7 @@ pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<Launche
     }
 }
 
-/// Executa `exe args…` sem janela e espera (substitui `RunWait(@ComSpec & " /C …")`).
+/// Runs `exe args…` without a window and waits (replaces `RunWait(@ComSpec & " /C …")`).
 pub fn run_hidden_wait(exe: &str, args: &[&str]) -> bool {
     use std::os::windows::process::CommandExt;
     std::process::Command::new(exe)
@@ -282,7 +282,7 @@ pub fn system32(name: &str) -> String {
     }
 }
 
-// ------------------------------------------------------------------ janelas
+// ------------------------------------------------------------------ windows
 
 unsafe extern "system" fn enum_cb(hwnd: HWND, lp: LPARAM) -> i32 {
     let v = &mut *(lp as *mut Vec<(HWND, String)>);
@@ -295,8 +295,8 @@ unsafe extern "system" fn enum_cb(hwnd: HWND, lp: LPARAM) -> i32 {
     1
 }
 
-/// Existe janela de nível superior (visível ou não) cujo título contém `part`
-/// (WinTitleMatchMode 2), ignorando janelas deste processo.
+/// A top-level window (visible or not) exists whose title contains `part`
+/// (WinTitleMatchMode 2), ignoring windows of this process.
 pub fn window_title_exists(part: &str) -> bool {
     let mut v: Vec<(HWND, String)> = Vec::new();
     unsafe {
@@ -310,14 +310,14 @@ pub fn window_title_exists(part: &str) -> bool {
     }
 }
 
-// ---------------------------------------------------------- instância única
+// ---------------------------------------------------------- single instance
 
 unsafe extern "system" fn singleton_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     DefWindowProcW(h, m, wp, lp)
 }
 
-/// `_SingletonPID`: devolve 0 se somos a primeira instância (e registra a
-/// janela-marcador oculta) ou o PID da instância já existente.
+/// `_SingletonPID`: returns 0 if we are the first instance (and registers the
+/// hidden marker window) or the PID of the existing instance.
 pub fn singleton_pid(code: &str) -> u32 {
     unsafe {
         let title = w(code);
@@ -339,7 +339,7 @@ pub fn singleton_pid(code: &str) -> u32 {
     }
 }
 
-// --------------------------------------------------------------------- rede
+// ------------------------------------------------------------------ network
 
 fn ping_ip(ip: std::net::Ipv4Addr, timeout_ms: u32) -> bool {
     unsafe {
@@ -378,21 +378,21 @@ pub fn ping(host: &str, timeout_ms: u32) -> bool {
     resolve_v4(host).map(|ip| ping_ip(ip, timeout_ms)).unwrap_or(false)
 }
 
-/// Conexão TCP de reserva (redes que bloqueiam ICMP).
+/// Fallback TCP connection (networks that block ICMP).
 pub fn tcp_reachable(host: &str, port: u16, timeout_ms: u64) -> bool {
     use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
     let Ok(mut addrs) = (host, port).to_socket_addrs() else { return false };
     addrs.any(|a: SocketAddr| TcpStream::connect_timeout(&a, std::time::Duration::from_millis(timeout_ms)).is_ok())
 }
 
-// ------------------------------------------------------------------- idioma
+// ----------------------------------------------------------------- language
 
-/// `@OSLang` em decimal (ex.: 1046 = pt-BR, 2057 = en-GB).
+/// `@OSLang` in decimal (e.g., 1046 = pt-BR, 2057 = en-GB).
 pub fn os_lang() -> u32 {
     unsafe { windows_sys::Win32::Globalization::GetSystemDefaultUILanguage() as u32 }
 }
 
-// -------------------------------------------------------------- pastas shell
+// ------------------------------------------------------------- shell folders
 
 pub fn csidl_path(csidl: i32) -> Option<String> {
     unsafe {
@@ -408,7 +408,7 @@ pub fn csidl_path(csidl: i32) -> Option<String> {
     }
 }
 
-/// Drive type / sistema de arquivos do volume que contém `path` ("NTFS"...).
+/// Drive type / file system of the volume that contains `path` ("NTFS"...).
 pub fn fs_name(path: &str) -> String {
     use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
     let root: String = path.chars().take(1).collect::<String>() + ":\\";

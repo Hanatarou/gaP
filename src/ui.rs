@@ -1,5 +1,5 @@
-//! Diálogos básicos Win32: MsgBox, InputBox (com máscara de senha),
-//! FileSelectFolder, FileOpenDialog e área de transferência.
+//! Basic Win32 dialogs: MsgBox, InputBox (with password mask),
+//! FileSelectFolder, FileOpenDialog and clipboard.
 
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
@@ -26,17 +26,17 @@ pub fn msgbox_raw(title: &str, text: &str, flags: u32) -> i32 {
     unsafe { MessageBoxW(null_mut(), w(text).as_ptr(), w(title).as_ptr(), flags | MB_SETFOREGROUND) }
 }
 
-/// MsgBox(64, …): informação com OK.
+/// MsgBox(64, …): information with OK.
 pub fn info(title: &str, text: &str) {
     msgbox_raw(title, text, MB_OK | MB_ICONINFORMATION);
 }
 
-/// Informação sempre-no-topo (keyword `message`).
+/// Always-on-top information (keyword `message`).
 pub fn info_topmost(title: &str, text: &str) {
     msgbox_raw(title, text, MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
 }
 
-/// MsgBox(33, …): OK/Cancelar. true = OK.
+/// MsgBox(33, …): OK/Cancel. true = OK.
 pub fn ok_cancel(title: &str, text: &str) -> bool {
     msgbox_raw(title, text, MB_OKCANCEL | MB_ICONINFORMATION) == IDOK
 }
@@ -114,7 +114,7 @@ pub fn clip_get() -> String {
     }
 }
 
-// ----------------------------------------------------------- Janela helper
+// ----------------------------------------------------------- Helper window
 
 pub unsafe fn hinstance() -> HINSTANCE {
     GetModuleHandleW(null()) as HINSTANCE
@@ -138,7 +138,7 @@ pub unsafe fn make_ctrl(
     h
 }
 
-/// Cria janela top-level com cliente (cw x ch) centralizada.
+/// Creates a top-level window with a centered client area (cw x ch).
 pub unsafe fn make_window(
     class: &str, title: &str, cw: i32, ch: i32, wndproc: WNDPROC, bg: COLORREF, style: u32,
 ) -> HWND {
@@ -172,7 +172,7 @@ pub fn init_common() {
     }
 }
 
-/// Loop de mensagens até WM_QUIT; devolve o código de saída.
+/// Message loop until WM_QUIT; returns the exit code.
 pub unsafe fn run_loop(dlg: HWND) -> i32 {
     let mut msg: MSG = std::mem::zeroed();
     while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
@@ -235,7 +235,7 @@ unsafe extern "system" fn input_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
     DefWindowProcW(hwnd, msg, wp, lp)
 }
 
-/// InputBox(título, prompt, "", máscara?, 360, 125). `None` = cancelado.
+/// InputBox(title, prompt, "", mask?, 360, 125). `None` = canceled.
 pub fn input_box(title: &str, prompt: &str, password: bool) -> Option<String> {
     unsafe {
         init_common();
@@ -272,7 +272,7 @@ pub fn input_box(title: &str, prompt: &str, password: bool) -> Option<String> {
     }
 }
 
-// ---------------------------------------------------------- Selecionadores
+// ----------------------------------------------------------------- Pickers
 
 unsafe extern "system" fn browse_cb(hwnd: HWND, msg: u32, _lp: LPARAM, data: LPARAM) -> i32 {
     if msg == BFFM_INITIALIZED {
@@ -281,7 +281,7 @@ unsafe extern "system" fn browse_cb(hwnd: HWND, msg: u32, _lp: LPARAM, data: LPA
     0
 }
 
-/// FileSelectFolder(prompt, "%HomeDrive%", 1). `None` = cancelado.
+/// FileSelectFolder(prompt, "%HomeDrive%", 1). `None` = canceled.
 pub fn select_folder(prompt: &str) -> Option<String> {
     unsafe {
         init_common();
@@ -314,7 +314,7 @@ pub fn select_folder(prompt: &str) -> Option<String> {
     }
 }
 
-/// FileOpenDialog(prompt, "%HomeDrive%", "All (*.*)"). `None` = cancelado.
+/// FileOpenDialog(prompt, "%HomeDrive%", "All (*.*)"). `None` = canceled.
 pub fn select_file(prompt: &str) -> Option<String> {
     unsafe {
         init_common();
@@ -339,7 +339,7 @@ pub fn select_file(prompt: &str) -> Option<String> {
     }
 }
 
-/// Abre URL/arquivo com o programa padrão (ShellExecute).
+/// Opens a URL/file with the default program (ShellExecute).
 pub fn shell_open(target: &str) {
     unsafe {
         ShellExecuteW(null_mut(), w("open").as_ptr(), w(target).as_ptr(), null(), null(), SW_SHOWNORMAL);

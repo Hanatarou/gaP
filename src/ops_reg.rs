@@ -1,4 +1,4 @@
-//! Palavras-chave de registro:
+//! Registry keywords:
 //! regkey, regvalue, (regkey), (regvalue), ->regkey, <-regkey, ->regvalue,
 //! <-regvalue, +regkey, +regvalue, -regkey, -regvalue, regexport, regimport.
 
@@ -13,7 +13,7 @@ fn arg(a: &[String], i: usize) -> &str {
     a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
 }
 
-/// Flag de visão do registro: NULL/vazio/x86 = 32 bits; x64 = 64 bits.
+/// Registry view flag: NULL/empty/x86 = 32 bits; x64 = 64 bits.
 fn view_of(ctx: &mut Ctx, s: &str) -> View {
     let f = ctx.expand(s);
     View::from_flag(if f.is_empty() || f == NULL { "x86" } else { &f })
@@ -23,7 +23,7 @@ fn key_of(ctx: &mut Ctx, s: &str) -> String {
     ctx.expand_ex(s, true).trim_end_matches('\\').to_string()
 }
 
-/// "HKCU\Software\K\Valor" -> ("HKCU\Software\K", "Valor").
+/// "HKCU\Software\K\Value" -> ("HKCU\Software\K", "Value").
 fn split_value(path: &str) -> (String, String) {
     match path.rfind('\\') {
         Some(i) => (path[..i].to_string(), path[i + 1..].to_string()),
@@ -48,7 +48,7 @@ fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
     f
 }
 
-// --------------------------------------------------------------- copiar/mover
+// ---------------------------------------------------------------- copy / move
 
 pub fn copy_key(src: &str, tgt: &str, mv: bool, view: View) {
     if eq_ic(src, tgt) || !reg::key_exists(src, view) {
@@ -95,7 +95,7 @@ pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
     copy_value(&src, &tgt, eq_ic(&cflag, "move"), view);
 }
 
-// ------------------------------------------------------------- criar / apagar
+// ------------------------------------------------------------ create / delete
 
 pub fn plus_regkey(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
@@ -142,9 +142,9 @@ pub fn minus_regvalue(ctx: &mut Ctx, args: &[String]) {
     reg::delete_value(&k, &name, view);
 }
 
-// ------------------------------------------------- backup / restauração
+// ----------------------------------------------------- backup / restore
 
-/// `regkey = Chave [:: arquivo.reg] [:: x86|x64]` (somente BEFORE).
+/// `regkey = Key [:: file.reg] [:: x86|x64]` (BEFORE only).
 pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let file = settings_reg(ctx, arg(args, 1));
@@ -160,7 +160,7 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::CleanParents { key: src, view });
 }
 
-/// `regvalue = Chave\Valor [:: arquivo.reg] [:: x86|x64]` (somente BEFORE).
+/// `regvalue = Key\Value [:: file.reg] [:: x86|x64]` (BEFORE only).
 pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let file = settings_reg(ctx, arg(args, 1));
@@ -176,7 +176,7 @@ pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::CleanParents { key: k, view });
 }
 
-/// `(regkey) = Chave [:: x86|x64]` (somente BEFORE).
+/// `(regkey) = Key [:: x86|x64]` (BEFORE only).
 pub fn pregkeyp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
@@ -188,7 +188,7 @@ pub fn pregkeyp_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::CleanParents { key: src, view });
 }
 
-/// `(regvalue) = Chave\Valor [:: x86|x64]` (somente BEFORE).
+/// `(regvalue) = Key\Value [:: x86|x64]` (BEFORE only).
 pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
@@ -201,7 +201,7 @@ pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
     ctx.after_prog.push(Prog::CleanParents { key: k, view });
 }
 
-/// Executa uma tarefa automática de registro (fila AFTER).
+/// Runs an automatic registry task (AFTER queue).
 pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
     match p {
         Prog::RegExport { key, file, view } => export_to(ctx, key, file, *view),
@@ -232,7 +232,7 @@ fn reg_escape(name: &str) -> String {
     name.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Mantém apenas o valor `name` do arquivo .reg exportado da chave `key`.
+/// Keeps only the value `name` of the .reg file exported from the key `key`.
 fn filter_single_value(file: &str, key: &str, name: &str) {
     let Some((text, enc)) = util::read_text(file) else { return };
     let want_key = key.to_lowercase();
@@ -255,7 +255,7 @@ fn filter_single_value(file: &str, key: &str, name: &str) {
             header_done = true;
         }
         if t.starts_with('[') && t.ends_with(']') {
-            // [HKEY_X\caminho] -> compara sem a raiz
+            // [HKEY_X\path] -> compare without the root
             let inner = &t[1..t.len() - 1];
             let rest = inner.split_once('\\').map(|x| x.1).unwrap_or("").to_lowercase();
             let want_rest = want_key.split_once('\\').map(|x| x.1).unwrap_or("").to_string();
@@ -278,8 +278,8 @@ fn filter_single_value(file: &str, key: &str, name: &str) {
     let _ = util::write_text(file, &out, enc);
 }
 
-/// Núcleo de `regexport` com caminhos resolvidos. `key_or_value` termina em
-/// '\' quando é uma chave; senão é "Chave\Valor".
+/// Core of `regexport` with resolved paths. `key_or_value` ends in
+/// '\' when it is a key; otherwise it is "Key\Value".
 pub fn export_to(_ctx: &Ctx, key_or_value: &str, file: &str, view: View) {
     let is_key = key_or_value.ends_with('\\');
     let spec = key_or_value.trim_end_matches('\\');
@@ -308,7 +308,7 @@ pub fn regexport_kw(ctx: &mut Ctx, args: &[String]) {
     export_to(ctx, &spec, &file, view);
 }
 
-/// Como `settings_reg`, mas sem forçar ".reg" em caminhos já terminados em .reg.
+/// Like `settings_reg`, but without forcing ".reg" on paths that already end in .reg.
 fn settings_reg_dirlike(ctx: &mut Ctx, a: &str) -> String {
     settings_reg(ctx, a)
 }

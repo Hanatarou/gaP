@@ -1,5 +1,5 @@
-//! Motor das seções BEFORE / AFTER: leitura do .ini, filtro x86/x64,
-//! normalização das palavras-chave, validação de seção/parâmetros e execução.
+//! Engine of the BEFORE / AFTER sections: .ini reading, x86/x64 filter,
+//! keyword normalization, section/parameter validation and execution.
 
 use crate::ctx::{exit_now, Ctx, Prog, Section, TaskKind};
 use crate::ini::IniDoc;
@@ -22,7 +22,7 @@ struct Spec {
 
 use Allowed::*;
 
-/// Tabela de palavras-chave (nome interno, nº mínimo/máximo de segmentos, seção).
+/// Keyword table (internal name, min/max number of segments, section).
 const SPECS: &[Spec] = &[
     Spec { name: "clean", min: 1, max: 1, allowed: Both },
     Spec { name: "dir", min: 1, max: 2, allowed: BeforeOnly },
@@ -80,8 +80,8 @@ const SPECS: &[Spec] = &[
 const RUN_FIRST_BEFORE: &[&str] = &["uservar", "envvar", "giniread", "gstringreplace"];
 const RUN_FIRST_AFTER: &[&str] = &["nowait", "quit", "uservar", "envvar", "giniread", "gstringreplace"];
 
-/// Aplica o filtro x86/x64 e converte "->dir" em "ltrdir" etc.
-/// `None` = item descartado pela arquitetura do SO.
+/// Applies the x86/x64 filter and converts "->dir" into "ltrdir", etc.
+/// `None` = item discarded because of the OS architecture.
 fn normalize(raw_key: &str, os_arch: &str) -> Option<String> {
     let has86 = util::contains_ic(raw_key, "x86");
     let has64 = util::contains_ic(raw_key, "x64");
@@ -139,7 +139,7 @@ fn run_prog(ctx: &mut Ctx, p: &Prog) {
     }
 }
 
-/// Executa um item do usuário (validando seção e número de parâmetros).
+/// Runs a user item (validating section and number of parameters).
 fn exec_user(ctx: &mut Ctx, sec: Section, kw: &str, args: &[String], raw_key: &str) {
     ctx.log(&format!("EXEC [{}] {} :: {:?}", sec.name(), kw, args));
     let Some(spec) = SPECS.iter().find(|s| s.name == kw) else {
@@ -221,7 +221,7 @@ fn exec_user(ctx: &mut Ctx, sec: Section, kw: &str, args: &[String], raw_key: &s
     }
 }
 
-/// `restore = 1`: executa agora as tarefas automáticas pendentes da seção AFTER.
+/// `restore = 1`: runs the pending automatic tasks of the AFTER section now.
 fn run_all_prog(ctx: &mut Ctx, args: &[String]) {
     let v = if args.is_empty() { 0 } else { ctx.expand_num(&args[0]) };
     if v == 1 {
@@ -261,8 +261,8 @@ pub fn process_after(ctx: &mut Ctx) {
             }
         }
     }
-    // Com `restore = 1` presente, as tarefas automáticas aguardam a palavra-chave
-    // (no original elas sempre rodavam antes, tornando `restore` inútil).
+    // With `restore = 1` present, the automatic tasks wait for the keyword
+    // (in the original they always ran before, making `restore` useless).
     let mut deferred = false;
     for t in &tasks {
         if let TaskKind::User { kw, args, .. } = t {
@@ -283,7 +283,7 @@ pub fn process_after(ctx: &mut Ctx) {
             *t = TaskKind::Done;
         }
     }
-    // restore = 1 nunca alcançado (ex.: removido por arquitetura): não deixar pendências.
+    // restore = 1 never reached (e.g., removed by architecture): leave nothing pending.
     if deferred && !ctx.after_prog.is_empty() {
         let list = std::mem::take(&mut ctx.after_prog);
         for p in &list {

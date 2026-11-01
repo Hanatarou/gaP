@@ -1,4 +1,4 @@
-//! Tabela LCID (decimal) -> (nome do locale, "Idioma - País"), extraída do gaP original.
+//! LCID (decimal) table -> (locale name, "Language - Country"), extracted from the original gaP.
 
 pub static LANGS: &[(u32, &str, &str)] = &[
     (4, "zh-CHS", "Chinese (Simplified) - China"),

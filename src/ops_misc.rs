@@ -1,4 +1,4 @@
-//! Palavras-chave diversas: clip, clean, delay, envvar, iniread, iniwrite,
+//! Miscellaneous keywords: clip, clean, delay, envvar, iniread, iniwrite,
 //! killprocess, message, nowait, quit, regdll, run, service, stringreplace,
 //! symlink, systemrefresh, uservar.
 
@@ -50,7 +50,7 @@ pub fn envvar(ctx: &mut Ctx, args: &[String]) {
     }
 }
 
-/// Define variável de usuário validando o nome.
+/// Defines a user variable, validating the name.
 pub fn set_user_var(ctx: &mut Ctx, name: &str, value: &str) {
     let reserved = RESERVED_VARS.iter().any(|r| eq_ic(r, name)) || FUNC_MACROS.iter().any(|r| eq_ic(r, name));
     if reserved || name.is_empty() {
@@ -113,7 +113,7 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
         let sec = sec.replace("*NULL*", "NULL");
         let s = if sec == "NULL" && arg(args, 1) != "*NULL*" { None } else { Some(sec.as_str()) };
         if key.is_empty() {
-            // nada a gravar (o original também ignorava este caso)
+            // nothing to write (the original also ignored this case)
         } else if val.is_empty() {
             doc.delete_key(s, &key);
         } else {
@@ -195,7 +195,7 @@ pub fn regdll(ctx: &mut Ctx, args: &[String]) {
     }
 }
 
-/// `run = App [:: wait] [:: parâmetros] [:: pasta]`.
+/// `run = App [:: wait] [:: parameters] [:: folder]`.
 pub fn grun(ctx: &mut Ctx, args: &[String]) {
     let app = full(ctx, arg(args, 0));
     let wait = ctx.expand(arg(args, 1));
@@ -218,7 +218,7 @@ pub fn grun(ctx: &mut Ctx, args: &[String]) {
     }
 }
 
-/// Separa o executável (que deve existir) dos parâmetros em `binPath`.
+/// Separates the executable (which must exist) from the parameters in `binPath`.
 fn service_exe_exists(spec: &str) -> bool {
     let s = spec.trim();
     if let Some(rest) = s.strip_prefix('"') {

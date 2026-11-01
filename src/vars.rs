@@ -1,13 +1,13 @@
-//! Expansão de macros (`FindReplaceX`): `{VAR}`, `{{VAR}}`, `!@@!…!@@!`
-//! (texto cifrado), `%PastaShell%`, `%VARIAVEL_DE_AMBIENTE%` e escapes
+//! Macro expansion (`FindReplaceX`): `{VAR}`, `{{VAR}}`, `!@@!…!@@!`
+//! (encrypted text), `%ShellFolder%`, `%ENVIRONMENT_VARIABLE%` and escapes
 //! `<{`, `<}`, `<<`.
 
 use crate::ctx::{exit_now, Ctx, FUNC_MACROS};
 use crate::langtable::LANGS;
 use crate::{crypto, sys, ui, util};
 
-/// Procura `open … close` não escapados (número par de '<' antes de cada
-/// delimitador). Devolve (início, fim_exclusivo, conteúdo interno).
+/// Looks for unescaped `open … close` (even number of '<' before each
+/// delimiter). Returns (start, end_exclusive, inner content).
 fn find_braced(s: &str, depth: usize) -> Option<(usize, usize, String)> {
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len();
@@ -44,7 +44,7 @@ pub fn unescape(s: &str) -> String {
     s.replace("<{", "{").replace("<}", "}").replace("<<", "<")
 }
 
-/// Expande `%NOME%` com variáveis de ambiente (Option ExpandEnvStrings do AutoIt).
+/// Expands `%NAME%` with environment variables (AutoIt Option ExpandEnvStrings).
 pub fn expand_env(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -81,7 +81,7 @@ fn lang_row() -> Option<(&'static str, &'static str)> {
 }
 
 impl Ctx {
-    /// Valor de uma macro "de função" (calculada a cada uso).
+    /// Value of a "function" macro (computed on every use).
     fn func_macro(&mut self, name: &str) -> String {
         let t = util::local_now();
         let h = t.hour;
@@ -130,7 +130,7 @@ impl Ctx {
         }
     }
 
-    /// Resolve o nome de uma macro (já sem escapes). `None` = indefinida.
+    /// Resolves the name of a macro (already without escapes). `None` = undefined.
     fn lookup_macro(&mut self, name: &str) -> Option<String> {
         if let Some(v) = self.get_var(name) {
             return Some(v.to_string());
@@ -141,7 +141,7 @@ impl Ctx {
         None
     }
 
-    /// Decifra um token `!@@!…!@@!` pedindo a senha (com cache e 3 tentativas).
+    /// Decrypts a `!@@!…!@@!` token asking for the password (with cache and 3 attempts).
     fn decrypt_token(&mut self, token: &str) -> String {
         if let Some(pw) = self.pw_cache.clone() {
             if let Some(t) = crypto::decrypt(token, &pw) {
@@ -161,8 +161,8 @@ impl Ctx {
         exit_now();
     }
 
-    /// `FindReplaceX`. `reg_key` = true remove o sufixo "64" da raiz do registro
-    /// (HKLM64 -> HKLM), o antigo flag `2`.
+    /// `FindReplaceX`. `reg_key` = true removes the suffix "64" from the registry root
+    /// (HKLM64 -> HKLM), the old flag `2`.
     pub fn expand_ex(&mut self, input: &str, reg_key: bool) -> String {
         let mut s = input.to_string();
         let mut guard = 0;
@@ -172,7 +172,7 @@ impl Ctx {
                 self.msg("Macro expansion limit reached (possible recursive variable).");
                 break;
             }
-            // 1) texto cifrado
+            // 1) encrypted text
             if let Some(a) = s.find(crypto::MARK) {
                 let from = a + crypto::MARK.len();
                 if let Some(b) = s[from..].find(crypto::MARK) {
@@ -183,7 +183,7 @@ impl Ctx {
                     continue;
                 }
             }
-            // 2) {{VAR}}: valor com '\' duplicado
+            // 2) {{VAR}}: value with doubled '\'
             if let Some((a, b, inner)) = find_braced(&s, 2) {
                 let name = unescape(&inner);
                 match self.lookup_macro(&name) {
@@ -213,7 +213,7 @@ impl Ctx {
             }
             break;
         }
-        // pastas do shell e variáveis de ambiente
+        // shell folders and environment variables
         for (name, val) in self.shell.clone() {
             if !val.is_empty() {
                 s = util::replace_all_ic(&s, &format!("%{}%", name), &val);
@@ -233,7 +233,7 @@ impl Ctx {
         self.expand_ex(input, false)
     }
 
-    /// Expande e converte para número (vazio/NULL = 0).
+    /// Expands and converts to a number (empty/NULL = 0).
     pub fn expand_num(&mut self, input: &str) -> i64 {
         let v = self.expand(input);
         util::auto_num(&v)
