@@ -27,7 +27,7 @@ jobs:
     outputs:
       tag: ${{ steps.v.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Version for the names of the files
         id: v
         env:
@@ -59,7 +59,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
       # It only speeds the job up, and Defender is not always available on the runner (error 0x800106ba): never fail for it.
@@ -91,7 +91,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
       # It only speeds the job up, and Defender is not always available on the runner (error 0x800106ba): never fail for it.
@@ -123,7 +123,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
       # It only speeds the job up, and Defender is not always available on the runner (error 0x800106ba): never fail for it.
@@ -161,7 +161,7 @@ jobs:
           sha256sum "gaP.exe" > "../$out.exe.sha256.txt"
           7z a "../$out.zip" "gaP.exe" >/dev/null
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: gaP-${{ matrix.name }}
           path: gaP-${{ needs.version.outputs.tag }}-${{ matrix.name }}.*
@@ -173,7 +173,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
