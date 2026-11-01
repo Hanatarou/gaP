@@ -196,15 +196,23 @@ pub fn run_crypt(script_full: &str) -> ! {
 
 // --------------------------------------------------------------- -license
 
+/// The LICENSE file of the repository, embedded in the program: "Save license" writes the text as it is on GitHub.
+const LICENSE_FILE: &str = include_str!("../LICENSE");
+
+/// The license as it is saved: the lines of the LICENSE file, with Windows line ends.
 pub fn license_text() -> String {
-    [
-        "MIT License",
-        "Copyright (c) 2015-2026 Bruno Eduardo (Aeolis)",
-        "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:",
-        "The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.",
-        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.",
-    ]
-    .join("\r\n\r\n")
+    format!("{}\r\n", LICENSE_FILE.replace("\r\n", "\n").trim_end().replace('\n', "\r\n"))
+}
+
+/// The license as it is shown in the window: one line per paragraph (the control wraps it to the width of the window).
+fn license_display() -> String {
+    LICENSE_FILE
+        .replace("\r\n", "\n")
+        .trim_end()
+        .split("\n\n")
+        .map(|p| p.replace('\n', " "))
+        .collect::<Vec<_>>()
+        .join("\r\n\r\n")
 }
 
 unsafe extern "system" fn license_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -245,7 +253,7 @@ pub fn run_license(script_full: &str, script_dir: &str) -> ! {
         ui::init_common();
         let title = format!("License - {}", PROGRAM_NAME);
         let hwnd = make_window("gaPLicenseWnd", &title, 530, 345, Some(license_proc), 0x00FF_FFFF, WS_DEFAULT_GUI);
-        make_ctrl(hwnd, "STATIC", &text, 0, 0, 8, 8, 515, 290, -1);
+        make_ctrl(hwnd, "STATIC", &license_display(), 0, 0, 8, 8, 515, 290, -1);
         make_ctrl(hwnd, "BUTTON", "Save license", WS_TABSTOP | BS_DEFPUSHBUTTON as u32, 0, 200, 305, 130, 30, ID_SAVE);
         ShowWindow(hwnd, SW_SHOW);
         crate::sys::reduce_memory();
@@ -300,8 +308,8 @@ pub fn run_about(script_full: &str) -> ! {
         make_ctrl(hwnd, "STATIC", "Author: Bruno Eduardo", 0, 0, 8, 79, 130, 21, -1);
         make_ctrl(hwnd, "STATIC", "Collaborators: tproli and all The Portable Freeware Collection Forums members", 0, 0, 8, 102, 380, 13, -1);
         make_ctrl(hwnd, "STATIC", "Credits: AutoIt creators, AutoIt Forums members and Claude (Rust port)", 0, 0, 8, 125, 380, 13, -1);
-        make_ctrl(hwnd, "STATIC", "gaP GitHub:", 0, 0, 8, 149, 76, 17, -1);
-        let link = make_ctrl(hwnd, "STATIC", "gaP GitHub", SS_NOTIFY as u32, 0, 78, 149, 85, 17, ID_LINK);
+        make_ctrl(hwnd, "STATIC", "gaP GitHub:", 0, 0, 8, 149, 64, 17, -1);
+        let link = make_ctrl(hwnd, "STATIC", "gaP GitHub", SS_NOTIFY as u32, 0, 70, 149, 85, 17, ID_LINK);
         LINK.with(|c| c.set(link));
         let font = CreateFontW(-11, 0, 0, 0, 700, 0, 1, 0, 1, 0, 0, 0, 0, w("MS Sans Serif").as_ptr());
         SendMessageW(link, WM_SETFONT, font as WPARAM, 1);
