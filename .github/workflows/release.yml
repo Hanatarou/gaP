@@ -62,7 +62,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
+      # It only speeds the job up, and Defender is not always available on the runner (error 0x800106ba): never fail for it.
       - name: Windows Defender exclusions
+        continue-on-error: true
         shell: pwsh
         run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
 
@@ -92,7 +94,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
+      # It only speeds the job up, and Defender is not always available on the runner (error 0x800106ba): never fail for it.
       - name: Windows Defender exclusions
+        continue-on-error: true
         shell: pwsh
         run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
 
@@ -122,7 +126,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Real-time scanning of every file the compiler writes slows the Windows jobs: the folders of the build are left out of it.
+      # It only speeds the job up, and Defender is not always available on the runner (error 0x800106ba): never fail for it.
       - name: Windows Defender exclusions
+        continue-on-error: true
         shell: pwsh
         run: Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
 
