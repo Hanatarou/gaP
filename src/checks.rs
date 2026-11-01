@@ -184,6 +184,45 @@ pub fn java_full(ctx: &mut Ctx) {
 
 // --------------------------------------------------------------- main application
 
+/// What `application` leads to: the index of the chosen segment (0 = x86, 1 = x64) or why
+/// none could be chosen.
+#[derive(Debug, PartialEq)]
+enum AppChoice {
+    Chosen(usize),
+    /// Only the x86 segment was tried (32-bit OS, or a single segment) and it does not exist.
+    NoX86,
+    /// Both segments were tried (64-bit OS) and none exists.
+    NoneValid,
+}
+
+/// Architecture of the application of a segment: the 2nd one is x64, the other is x86.
+fn segment_arch(index: usize) -> &'static str {
+    if index == 1 {
+        "x64"
+    } else {
+        "x86"
+    }
+}
+
+/// Chooses the segment of `application`: on a 64-bit OS the 2nd (x64) one if it exists,
+/// otherwise the 1st (x86) one; on a 32-bit OS, or with a single segment, always the 1st.
+/// `exists(i)` tells whether the application of segment `i` exists.
+fn choose_segment(os_arch: &str, segments: usize, exists: impl Fn(usize) -> bool) -> AppChoice {
+    if os_arch == "x64" && segments >= 2 {
+        if exists(1) {
+            AppChoice::Chosen(1)
+        } else if exists(0) {
+            AppChoice::Chosen(0)
+        } else {
+            AppChoice::NoneValid
+        }
+    } else if exists(0) {
+        AppChoice::Chosen(0)
+    } else {
+        AppChoice::NoX86
+    }
+}
+
 pub fn main_app_init(ctx: &mut Ctx) {
     let app = general(ctx, "application", "");
     if app.is_empty() || app == "NULL" {
@@ -210,32 +249,20 @@ pub fn main_app_init(ctx: &mut Ctx) {
     // The 1st segment is the x86 application and the 2nd one is the x64 application, so the
     // architecture of the application is the architecture of the segment that was chosen.
     // Existence is checked as that application sees the path (System32 vs SysWOW64).
-    let exists_as = |arch: &str, p: &str| util::exists(&sys::io_path(arch, p));
-    let chosen;
-    let mut app_arch = "x86";
-    if ctx.os_arch == "x64" && segs.len() >= 2 {
-        let p64 = pick(ctx, &segs[1]);
-        if exists_as("x64", &p64) {
-            chosen = p64;
-            app_arch = "x64";
-        } else {
-            let p86 = pick(ctx, &segs[0]);
-            if exists_as("x86", &p86) {
-                chosen = p86;
-            } else {
-                ctx.msg("The main application (x86) path and (x64) path are invalid.");
-                exit_now();
-            }
-        }
-    } else {
-        let p86 = pick(ctx, &segs[0]);
-        if exists_as("x86", &p86) {
-            chosen = p86;
-        } else {
+    let exists = |i: usize| util::exists(&sys::io_path(segment_arch(i), &pick(ctx, &segs[i])));
+    let index = match choose_segment(ctx.os_arch, segs.len(), exists) {
+        AppChoice::Chosen(i) => i,
+        AppChoice::NoX86 => {
             ctx.msg("The main application (x86) path is invalid.");
             exit_now();
         }
-    }
+        AppChoice::NoneValid => {
+            ctx.msg("The main application (x86) path and (x64) path are invalid.");
+            exit_now();
+        }
+    };
+    let chosen = pick(ctx, &segs[index]);
+    let app_arch = segment_arch(index);
     let exepath = chosen.rfind('\\').map(|i| chosen[..i].to_string()).unwrap_or_default();
     ctx.app_arch = app_arch;
     ctx.add_var("APPEXE", &chosen);
@@ -566,7 +593,23 @@ pub fn wait_init(ctx: &mut Ctx) {
 
 #[cfg(test)]
 mod tests {
-    use super::{os_level, os_threshold};
+    use super::{choose_segment, os_level, os_threshold, segment_arch, AppChoice};
+
+    #[test]
+    fn application_segment_choice() {
+        // 32-bit OS: always the 1st segment, even when a 2nd one is written
+        assert_eq!(choose_segment("x86", 2, |i| i == 1), AppChoice::NoX86);
+        assert_eq!(choose_segment("x86", 2, |_| true), AppChoice::Chosen(0));
+        // a single segment on a 64-bit OS
+        assert_eq!(choose_segment("x64", 1, |_| true), AppChoice::Chosen(0));
+        assert_eq!(choose_segment("x64", 1, |_| false), AppChoice::NoX86);
+        // 64-bit OS, two segments: the x64 one wins, then the x86 one, then nothing
+        assert_eq!(choose_segment("x64", 2, |_| true), AppChoice::Chosen(1));
+        assert_eq!(choose_segment("x64", 2, |i| i == 1), AppChoice::Chosen(1));
+        assert_eq!(choose_segment("x64", 2, |i| i == 0), AppChoice::Chosen(0));
+        assert_eq!(choose_segment("x64", 2, |_| false), AppChoice::NoneValid);
+        assert_eq!((segment_arch(0), segment_arch(1)), ("x86", "x64"));
+    }
 
     #[test]
     fn os_values_and_levels() {

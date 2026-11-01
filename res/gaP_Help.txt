@@ -1501,7 +1501,9 @@ Notes:
 {EXEPATH} absolute path of the main application's directory
 {APPEXE} absolute path of the main application
 {DRIVE} current drive letter of the launcher, eg. "D"
-{JAVAEXE} absolute path to installed Java executable (javaw.exe)
+{JAVAEXE} absolute path to installed Java executable (javaw.exe). It is the
+          first one found (64-bit Java before 32-bit), whatever the
+          architecture of the main application is
 {USERFILE} browse file dialog to dynamically add filepath
 {USERDIR} browse directory dialog to dynamically add path
 {WORKDIR} working directory of the main application
