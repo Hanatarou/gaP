@@ -1,0 +1,39 @@
+[package]
+name = "gap"
+version = "2.0.0"
+edition = "2021"
+description = "gaP: great! another Portabilizer (Rust port of the AutoIt original)"
+license = "MIT"
+
+[dependencies]
+sha1 = "0.11"
+md-5 = "0.11"
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+cipher = { version = "0.5", features = ["block-padding", "alloc"] }
+
+[dependencies.windows-sys]
+version = "0.61"
+features = [
+  "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem",
+  "Win32_System_Registry", "Win32_System_Threading", "Win32_System_LibraryLoader",
+  "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus",
+  "Win32_System_SystemInformation", "Win32_System_SystemServices",
+  "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Memory",
+  "Win32_System_DataExchange", "Win32_System_Ole", "Win32_System_Time",
+  "Win32_System_WindowsProgramming", "Win32_System_Environment",
+  "Win32_System_Com", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Shell_Common",
+  "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Gdi", "Win32_Globalization", "Win32_NetworkManagement_IpHelper",
+  "Win32_Networking_WinSock", "Win32_Security_Authorization",
+]
+
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

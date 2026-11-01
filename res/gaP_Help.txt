@@ -1,0 +1,1562 @@
+[Revision]
+
+This file is Revision 4 from 18/JUL/2015.
+
+[About]
+
+gaP is a universal DIY (Do It Yourself) style launcher for creating
+portable applications on Windows. gaP is based on yaP which is tproli
+creation (#1, #2).
+
+[Credits]
+
+I would like to express my gratitude to tproli for creating yaP and 
+allowing me to base my work on it. My big thank you for all The
+Portable Freeware Collection Forums members for testing gaP.
+
+A special thank you for AutoIt creators and all AutoIt Forums members.
+gaP would not exist without your work and help.
+
+[How gaP works]
+
+When launching gaP it reads settings from an ini file to what files and
+directories to copy and which registry keys to backup etc.. Then launches
+the main application and waits until it is closed. When that happens, gaP
+saves application settings to the portable directory and restores local
+backups.
+
+gaP main features:
+
+* portabilize applications by listing directories, files, registry keys 
+  and values in an ini file;
+* automatically run the 64bit version of the main application if available;
+* create, copy, move and delete files, directories, registry keys and
+  values;
+* handle x86 and x64 registry entries by using the appropriate switch in
+  the registry based functions;
+* various checks: administrator rights, multiple instance, OS version, .NET,
+  Java and Internet connection;
+* request administrator rights if administrator rights are required;
+* execute batch files;
+* import and export registry keys;
+* merge reg files;
+* read and write ini files;
+* replace strings or lines in text files;
+* set environment variables;
+* show custom messages;
+* run applications;
+* create, delete, start and stop services;
+* delete the oldest or newest files or folders based on date or name
+  (useful to keep backup files or folders under a defined number);
+* create symlinks (requires NTFS file system, administrator rights and
+  compatible OS);
+* register and unregister dll files;
+* environment variable and shell folder expansion;
+* path, date, text and language macros;
+* set file and directory attributes;
+* encrypt configuration items using "-crypt" parameter;
+* refresh system shell icons;
+* kill processes;
+* put text on clipboard; and
+* clean "MuiCache" and "App Paths" values from registry on demand and
+  on close.
+
+[Usage]
+
+Before start, examine the application you are about to portabilize and
+find out where does it store settings, how deeply integrates to the
+system etc.. This is necessary to be able to tell gaP what directories,
+files, registry keys to take care of.
+
+Follow these steps to create a new gaP launcher:
+
+1. Create a new directory ("MyApp", for instance) and put application's files
+   to a subdirectory ("MyApp\App", for instance). Use Universal Extractor (#3)
+   to get application files if it is an installer or install and uninstall 
+   if other methods fail.
+   
+2. Copy "gaP.exe" to "MyApp" directory and rename it to a custom name 
+   ("MyAppPortable.exe", for instance).
+
+3. Run "MyAppPortable.exe" and click Ok to generate a new gaP settings 
+   file ("MyAppPortable.ini").
+
+4. Edit "MyAppPortable.ini" and fill the necessary fields.
+
+* Add main application's exe path (application = App\MyAppName.exe); and
+* List files, directories, registry keys or values to portabilize.
+
+Refer to the configuration "Configuration" section for ini syntax.
+
+5. Run "MyAppPortable.exe".
+
+Note: if your portable needs advanced logic you can execute custom batch
+files with gaP.
+
+[gaP parameters]
+
+gaP currently accepts four parameters:
+
+* -crypt --> opens gaP encryption and decryption interface;
+* -license --> opens gaP license interface;
+* -about --> opens gaP about interface; and
+* -help --> creates a copy of gaP help file in "gaP.exe" 
+  root folder.
+
+[Encrypting text]
+
+It is possible to add encrypted text to config files. The purpose is to 
+avoid sensitive data in plain text format (passwords, file paths etc.).
+
+Run "gaP.exe" with the "-crypt" parameter and it will open its encryption 
+and decryption interface.
+
+As soon as gaP detects an encrypted text in gaP configuration ini it will 
+open a password entry dialog to decrypt the text entry.
+
+[Configuration]
+
+Ini sections:
+
+* GENERAL: contains application path, commandline parameters and
+  working directory, plus initial system checks;
+* BEFORE: items that are run before launching the main application;
+* AFTER: items that are run after closing the main application; and
+* QUICK REFERENCE: a help section to provide an overview of the
+  available items.
+
+Structure of the items:
+
+* Items consist of keyword and value pairs. Values may contain several
+  segments separated with the " :: " delimiter;
+* If a segment needs to be skipped set its content to "NULL". Optional
+  segments are indicated with square brackets;
+* Items can be commented out with the ";" character. Comments are
+  skipped by gaP; and
+* Any keyword followed by a "x86" or "x64" text will be processed only if
+  the host OS architecture matches the "x86" or "x64" text.
+
+Examples:
+
+keyword = segment1                                         ; config item with one segment
+keyword = segment1 :: segment2 :: segment3                 ; item with three segments
+keyword = segment1 :: NULL :: segment3                     ; item with three segments (second segment is empty)
+keyword = segment1 [ :: segment2]                          ; item with an optional second segment
+; keyword = segment1                                       ; commented item (it will not be processed)
+keywordx86 = segment1                                      ; config item with one segment (processed ONLY if host OS architecture is 32 bits)
+keywordx64 = segment1 :: segment2 :: segment3              ; item with three segments (processed ONLY if host OS architecture is 64 bits)
+
+Order of the items:
+
+The first item should always be "application" in the GENERAL section.
+The order of the items are arbitrary otherwise. Some keywords are
+restricted to BEFORE or AFTER sections, these are indicated below.
+Keywords used in the wrong sections will show a warning.
+
+Paths:
+
+Paths can be absolute or relative to the launcher. DO NOT add quotes
+around them if they contain spaces. Environment variables, shell folders
+and gaP macros (see the Variables and macros section) can also be used
+when constructing paths.
+
+Special characters:
+
+Variables can be called by using curly brackets "{" and "}" around their
+name. When there is the need to use real curly brackets in text without
+calling a variable they must be escaped using an angle bracket "<", for
+instance "<{" and "<}".
+
+[Keywords to use in the GENERAL section]
+
+[application]
+Description:
+
+Path of the main application to run. Required.
+
+Syntax:
+
+application = Application path x86 :: Application path x64 [ :: Application window state [hide|min|max]]
+
+Examples:
+
+application = C:\Dir\App.exe :: ..\Dir\AppX64.exe
+application = %ProgramFiles%\App.exe :: %ProgramFiles%\AppX64.exe :: max
+application = %ProgramFiles%\App.exe :: NULL :: max
+application = NULL :: %ProgramFiles%\AppX64.exe :: max
+
+Notes:
+
+* On a 64bit OS gaP automatically launches the application set in the
+second segment (if available).
+
+[commandline]
+Description:
+
+Commandline parameters to pass to the main application.
+
+Syntax:
+
+commandline = Commandline parameters
+
+Examples:
+
+commandline = /nosplash
+commandline = --dir="{GAPROOT}\Settings"
+
+Notes:
+
+* None.
+
+[workdir]
+Description:
+
+Working directory of the main application.
+
+Syntax:
+
+workdir = Directory path
+
+Examples:
+
+workdir = C:\MyApp
+workdir = %Appdata%\MyApplication
+
+Notes:
+
+* Defaults to the main application's directory if not specified otherwise.
+
+[!admin]
+Description:
+
+Indicate that administrator rights are required for the main application to run.
+
+Syntax:
+
+!administrator = Action number [-1|1|2]
+
+Examples:
+
+!administrator = -1                  ; quit if user doesn't have administrator rights (no message)
+!administrator = 1                   ; start the launcher with administrator rights
+!administrator = 2                   ; show a message if user is not administrator and quit
+
+Notes:
+
+* None.
+
+[!dotnet]
+Description:
+
+Notify the user if the specified .NET version is needed to run the main
+application and is not available on the host machine.
+
+Syntax:
+
+!dotnet = .NET version number
+
+Examples:
+
+!dotnet = 4.0
+!dotnet = 2.1!
+
+Notes:
+
+* Use an exclamation mark to exit if the specified version is not available.
+
+[!java]
+Description:
+
+Notify the user if the specified Java version is needed to run the main
+application and is not available on the host machine.
+
+Syntax:
+
+!java = Java version number
+
+Examples:
+
+!java = 1.6
+!java = 1.7!
+
+Notes:
+
+* Use an exclamation mark to exit if the specified version is not available.
+
+[!multiple]
+Description:
+
+Enable or disable multiple instances of the main application.
+
+Syntax:
+
+!multiple = Action number [-1|0|1]
+
+Examples:
+
+!multiple = -1                       ; always disable multiple instances (no dialog)
+!multiple = 0                        ; show a dialog asking user what to do
+!multiple = 1                        ; always enable multiple instances (no dialog)
+
+Notes:
+
+* If not specified otherwise gaP defaults this option to "0"
+  asking user what to do.
+
+[!online]
+Description:
+
+Notify the user that Internet connection is required for the main
+application if offline (or vice versa).
+
+Syntax:
+
+!online = Action number [-4|-3|-2|-1|1|2]
+
+Examples:
+
+!online = 1                          ; ask to continue if online status is required (if offline)
+!online = 2                          ; show a dialog box that online connection is required and quit (if offline)
+!online = -1                         ; quit without a dialog box (if offline)
+!online = -2                         ; ask to continue if offline status is required (if online)
+!online = -3                         ; show a dialog box that offline connection is required and quit (if online)
+!online = -4                         ; quit without a dialog box (if online)
+
+Notes:
+
+* None.
+
+[!os]
+Description:
+
+Notify the user if the current OS version does not meet the main
+application's minimum or maximum OS requirement.
+
+Syntax:
+
+!os = OS action code [XP|Vista|7|8|8.1]
+
+Examples:
+
+!os = XP                             ; the main application requires Windows XP or newer
+!os = Vista                          ; the main application requires Windows Vista or newer
+!os = <7                             ; the main application requires Windows 7 or older
+!os = 8                              ; the main application requires Windows 8 or newer
+
+Notes:
+
+* Use the "<" character before the OS action code to
+  indicate the maximum OS version.
+
+[!readonly]
+Description:
+
+Notify the user that the main application and launcher are running
+from a read only drive.
+
+Syntax:
+
+!readonly = Action number [-2|-1|1|2]
+
+Examples:
+
+!readonly = -2                       ; quit without a dialog box (if running from a read only drive)
+!readonly = -1                       ; show a dialog box regarding read only drive and quit (if running from a read only drive)
+!readonly = 1                        ; show a dialog box regarding read only drive and continue (if running from a read only drive)
+!readonly = 2                        ; continue without a dialog box (if running from a read only drive)
+
+Notes:
+
+* If not specified otherwise gaP defaults this option to "1" showing
+  a dialog box regarding read only drive and continuing.
+
+[!waitprocess]
+Description:
+
+Title (or part of the title) of a process that should be closed before
+executing AFTER items.
+
+Syntax:
+
+!waitprocess = Full or partial process title
+
+Examples:
+
+!waitprocess = - Notepad++           ; wait for all applications to close having "- Notepad++" in title
+
+Notes:
+
+* Some applications are only launchers to other applications and in these
+  cases gaP would execute AFTER items right after closing the main application.
+  By specifying a process to wait it is possible to run AFTER items only when
+  the process terminates;
+* The value can be the full title of a process window or only part of
+  it. Be careful not adding too generic values; and
+* All matching processes should be closed to start executing AFTER items.
+
+[Keywords to use in BEFORE and AFTER sections]
+
+[dir]
+Description:
+
+Backup, save and restore contents of a directory.
+
+Syntax:
+
+dir = Source directory path :: Target directory path
+
+Examples:
+
+dir = C:\Dir :: SubDir
+dir = C:\Dir                         ; Settings subdirectory will be used as target directory
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* If target directory is missing the "Settings" subdirectory of the
+  launcher will be used;
+* Operations on BEFORE section:
+1. backup directory "C:\Dir" to "C:\Dir_backup"
+2. create directory "C:\Dir"
+3. copy contents of directory "{GAPROOT}\SubDir" to "C:\Dir"
+* Operations on AFTER section:
+1. copy contents of directory "C:\Dir" to "{GAPROOT}\SubDir"
+2. delete directory "C:\Dir"
+3. restore directory "C:\Dir_backup" to "C:\Dir"
+
+[file]
+Description:
+
+Backup, save and restore a file.
+
+Syntax:
+
+file = Source file path :: Target file or directory path
+
+Examples:
+
+file = %Appdata%\MyFile.ini :: SubDir\MyFile.ini
+file = C:\Dir\MyFile.ini :: SubDir
+file = C:\Dir\MyFile.ini                                   ; launcher directory will be used as target directory
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* If the target file or directory is missing the launcher directory
+  will be used;
+* Operations on BEFORE section:
+1. backup file "C:\Dir\MyFile.ini" to "C:\Dir\MyFile.ini_backup"
+2. copy file "{GAPROOT}\SubDir\MyFile.ini" to directory "C:\Dir"
+* Operations on AFTER section:
+1. move file "C:\Dir\MyFile.ini" to directory "{GAPROOT}\SubDir"
+2. restore file "C:\Dir\MyFile.ini_backup" to "C:\Dir\MyFile.ini"
+
+[regkey]
+Description:
+
+Backup, save and restore a registry key.
+
+Syntax:
+
+regkey = Source registry key [ :: Target registry export file or target directory path] [ :: Registry flag [x86|x64]]
+
+Examples:
+
+regkey = HKCU\Software\RegKey :: SubDir\settings.reg       ; save the x86 reg key (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regkey = HKCU\Software\RegKey :: settings.reg :: x64       ; save the x64 reg key in "{GAPROOT}\settings.reg"
+regkey = HKCU\Software\RegKey :: SubDir                    ; save the x86 reg key (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regkey = HKCU\Software\RegKey :: NULL :: x64               ; save the x64 reg key in "{GAPROOT}\settings.reg"
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* If the target registry export file is missing the registry key will
+  be exported to "settings.reg" to the launcher's root directory;
+* If the Registry flag is not declared it defaults to "x86";
+* Operations on BEFORE section:
+1. backup regkey "HKCU\Software\RegKey" to "HKCU\Software\RegKey_backup"
+2. import file "settings.reg" to the registry
+* Operations on AFTER section:
+1. export regkey "HKCU\Software\RegKey" to "settings.reg"
+2. delete regkey "HKCU\Software\RegKey"
+3. restore regkey "HKCU\Software\RegKey_backup" to "HKCU\Software\RegKey"
+4. delete empty parent regkeys if regkey is a subkey of "HKCU\Software"
+   or "HKLM\Software"
+
+[regvalue]
+Description:
+
+Backup, save and restore a registry value.
+
+Syntax:
+
+regvalue = Source registry value [ :: Target registry export file or target directory path] [ :: Registry flag [x86|x64]]
+
+Examples:
+
+regvalue = HKCU\Software\Key\Value :: SubDir\settings.reg            ; save the x86 reg value (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regvalue = HKCU\Software\Key\Value :: settings.reg :: x64            ; save the x64 reg value in "{GAPROOT}\SubDir\settings.reg"
+regvalue = HKCU\Software\Key\Value :: SubDir                         ; save the x86 reg value (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regvalue = HKCU\Software\Key\Value :: NULL :: x64                    ; save the x64 reg value in "{GAPROOT}\settings.reg"
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* If the target registry export file is not set the registry value
+  will be exported to "settings.reg" to the launcher's root directory;
+* If the Registry flag is not declared it defaults to "x86";
+* Operations on BEFORE section:
+1. backup reg value "HKCU\Software\Key\Value" to
+   "HKCU\Software\Key\Value_backup"
+2. import file "settings.reg" to the registry
+* Operations on AFTER section:
+1. export reg value "HKCU\Software\Key\Value" to "settings.reg"
+2. delete reg value "HKCU\Software\Key\Value"
+3. restore reg value "HKCU\Software\Key\Value_backup" to
+   "HKCU\Software\Key\Value"
+4. delete empty parent regkeys if regkey is a subkey of "HKCU\Software"
+   or "HKLM\Software"
+   
+[(dir)]
+Description:
+
+Backup and restore a directory.
+
+Syntax:
+
+(dir) = Directory path
+
+Examples:
+
+(dir) = C:\Dir
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* Operations on BEFORE section:
+1. backup directory "C:\Dir" to "C:\Dir_backup"
+* Operations on AFTER section:
+1. restore directory "C:\Dir_backup" to "C:\Dir"
+
+[(file)]
+Description:
+
+Backup and restore a file.
+
+Syntax:
+
+(file) = File path
+
+Examples:
+
+(file) = C:\Dir\MyFile.ini
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* Operations on BEFORE section:
+1. backup file "C:\Dir\MyFile.ini" to "C:\Dir\MyFile.ini_backup"
+* Operations on AFTER section:
+1. restore file "C:\Dir\MyFile.ini_backup" to "C:\Dir\MyFile.ini"
+
+[(regkey)]
+Description:
+
+Backup and restore a registry key.
+
+Syntax:
+
+(regkey) = Registry key [ :: Registry flag [x86|x64]]
+
+Examples:
+
+(regkey) = HKCU\Software\RegKey :: x64
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* If the Registry flag is not declared it defaults to "x86";
+* Operations on BEFORE section:
+1. backup regkey "HKCU\Software\RegKey" to "HKCU\Software\RegKey_backup"
+* Operations on AFTER section:
+1. delete regkey "HKCU\Software\RegKey"
+2. restore regkey "HKCU\Software\RegKey_backup" to "HKCU\Software\RegKey"
+3. delete empty parent regkey(s) if regkey is a subkey of
+   "HKCU\Software" or "HKLM\Software" 
+
+[(regvalue)]
+Description:
+
+Backup and restore a registry value.
+
+Syntax:
+
+(regvalue) = Registry value [ :: Registry flag [x86|x64]]
+
+Examples:
+
+(regvalue) = HKCU\Software\Key\Value :: x64
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* If the Registry flag is not declared it defaults to "x86";
+* Operations on BEFORE section:
+1. backup reg value "HKCU\Software\Key\Value" to
+   "HKCU\Software\Key\Value_backup"
+* Operations on AFTER section:
+1. delete reg value "HKCU\Software\Key\Value"
+2. restore reg value "HKCU\Software\Key\Value_backup" to
+   "HKCU\Software\Key\Value"
+3. delete empty parent regkey(s) if regkey is a subkey of
+   "HKCU\Software" or "HKLM\Software"
+
+[->dir]
+Description:
+
+Copy or move contents of a directory to another directory.
+
+Syntax:
+
+->dir = Source directory path [ :: Target directory path] [ :: copy|move, no overwrite|overwrite]
+
+Examples:
+
+->dir = %Temp%\Dir :: SubDir                               ; copy contents of "%Temp%\Dir" to "{GAPROOT}\SubDir"
+<-dir = %Temp%\Dir :: SubDir :: move                       ; move contents of "{GAPROOT}\SubDir" to "%Temp%\Dir"
+->dir = C:\Dir :: C:\Dir_old :: no overwrite               ; backup dir to "C:\Dir_old" (copy, skip existing)
+<-dir = C:\Dir :: C:\Dir_backup :: move                    ; restore dir "C:\Dir_backup" to "C:\Dir" (move)
+->dir = %Desktop%\OldDir :: %Desktop%\NewDir :: move       ; rename "OldDir" to "NewDir" on Desktop
+
+Notes:
+
+* Use "<-dir" keyword to reverse direction;
+* Use the "move" flag to move directory contents instead of "copy".
+  After moving the source directory is deleted;
+* Use the "no overwrite" flag to skip operation if the target already
+  exists;
+* To rename a directory move directory contents to a different
+  directory on the same path;
+* An empty target directory (NULL) defaults to "Settings" subdirectory
+  of the launcher; and
+* If source and target are equal no operation will be done.
+
+[->file]
+Description:
+
+Copy or move a file.
+
+Syntax:
+
+->file = Source file path [ :: Target file or directory path] [ :: copy|move, no overwrite|overwrite]
+
+Examples:
+
+->file = C:\File.ini :: Dir                                ; copy "C:\File.ini" to "{GAPROOT}\Dir"
+->file = C:\File.ini :: Dir\File.ini :: move               ; move "C:\File.ini" to "{GAPROOT}\Dir"
+<-file = C:\File.ini :: Dir\File.ini :: move               ; move "{GAPROOT}\Dir\File.ini" to "C:\"
+->file = %Appdata%\settings.xml                            ; copy "%Appdata%\settings.xml" to launcher directory
+<-file = C:\a.7z :: NULL :: no overwrite                   ; copy "{GAPROOT}\a.7z" to "C:\" (skip existing)
+->file = File.txt :: Todo.txt :: move                      ; rename "File.txt" to "Todo.txt"
+
+Notes:
+
+* Use "<-file" keyword to reverse direction;
+* Use the "move" flag to move file instead of copy. After moving the
+  source file is deleted;
+* Use the "no overwrite" flag to skip operation if the target already
+  exists;
+* If target is a directory then the target filename will be the same
+  as the source filename;
+* To rename a file move file to a different filename on the same path;
+* An empty target (NULL) defaults to launcher root directory; and
+* If source and target are equal no operation will be done.
+
+[->regkey]
+Description:
+
+Copy or move contents of a registry key to another registry key.
+
+Syntax:
+
+->regkey = Source registry key :: Target registry key [ :: copy|move] [ :: Registry flag [x86|x64]]
+
+Examples:
+
+->regkey = HKCU\Software\A :: HKCU\Software\B :: NULL :: x64                   ; copy contents of regkey A to B
+<-regkey = HKCU\Software\A :: HKCU\Software\B :: move                          ; move contents of regkey B to A
+->regkey = HKCU\Software\OldKey :: HKCU\Software\NewKey :: move                ; rename regkey
+
+Notes:
+
+* Use "<-regkey" keyword to reverse direction;
+* Use the "move" flag to move registry key contents instead of copy.
+  After moving the source key is deleted;
+* If the Registry flag is not declared it defaults to "x86";
+* To rename a registry key move key contents to a different key under
+  the same key; and
+* If the target registry key is left empty or source and target are
+  equal no operation will be done.
+
+[->regvalue]
+Description:
+
+Copy or move contents of a registry value to another registry value.
+
+Syntax:
+
+->regvalue = Source registry value :: Target registry value [ :: copy|move] [ :: Registry flag [x86|x64]]
+
+Examples:
+
+->regvalue = HKCU\Software\Key\A :: HKCU\Software\Key\B :: NULL :: x64                   ; copy value of A to B
+<-regvalue = HKCU\Software\Key\A :: HKCU\Software\Key\B :: move                          ; move value of B to A
+->regvalue = HKCU\Software\Key\OldValue :: HKCU\Software\Key\NewValue :: move            ; rename value
+
+Notes:
+
+* Use "<-regvalue" keyword to reverse direction;
+* Use the "move" flag to move registry value instead of copy. After
+  moving the source value is deleted;
+* If the Registry flag is not declared it defaults to "x86";
+* To rename a registry value move value to a different value under the
+  same key; and
+* If the target registry value is left empty or source and target are
+  equal no operation will be done.
+
+[+dir]
+Description:
+
+Create a new directory.
+
+Syntax:
+
++dir = Directory path
+
+Examples:
+
++dir = C:\Dir
+
+Notes:
+
+* None.
+
+[+file]
+Description:
+
+Create a new file.
+
+Syntax:
+
++file = File path [ :: overwrite|no overwrite] [ :: file contents]
+
+Examples:
+
++file = C:\Dir\MyFile.ini
++file = C:\Dir\MyFile.ini :: overwrite :: Hello world
++file = C:\Dir\MyFile.ini :: no overwrite :: [SETTINGS]{LINEBREAK}update=0
+
+Notes:
+
+* If the "no overwrite" flag is present the file will not be created if
+  already exists;
+* File contents can be set in the third segment; and
+* Set the "file contents" field value to "*NULL*" to write the word
+  "NULL" in the file.
+ 
+[+regkey]
+Description:
+
+Create a new registry key.
+
+Syntax:
+
++regkey = Registry key [ :: Registry flag [x86|x64]]
+
+Examples:
+
++regkey = HKCU\Software\RegKey :: x64
+
+Notes:
+
+* If the Registry flag is not declared it defaults to "x86".
+
+[+regvalue]
+Description:
+
+Create a new registry value.
+
+Syntax:
+
++regvalue = RegKey :: RegValueName :: RegValueData :: DataType :: RegSeparator [ :: Registry flag [x86|x64]]
+
+Examples:
+
++regvalue = HKCU\Software\MyApp :: Language :: English :: NULL :: NULL :: x64
++regvalue = HKCU\Software\MyApp :: FirstStart :: 0 :: REG_DWORD
+
+Notes:
+
+* "RegKey" is the registry key where the value will be added;
+* "RegValueName" is the name of the registry value to be added;
+* "RegValueData" is the data to add to "RegValueName";
+* "DataType" is the type of the "RegValueData". Defaults to "REG_SZ" if
+  missing. Some possible values are "REG_SZ", "REG_MULTI_SZ", "REG_EXPAND_SZ",
+  "REG_DWORD", "REG_QWORD", "REG_BINARY" etc.;
+* "RegSeparator" is the separator for "DataType" "REG_MULTI_SZ". Not
+  needed for other types; and
+* If the Registry flag is not declared it defaults to "x86".
+
+[-dir]
+Description:
+
+Delete directory or directories.
+
+Syntax:
+
+-dir = Directory path [ :: ifempty]
+
+Examples:
+
+-dir = %Appdata%\Dir
+-dir = C:\Dir :: ifempty             ; delete "C:\Dir" only if it contains no files or subdirectories
+-dir = %Temp%\cache-*                ; delete all directories from "%Temp%" that starts with "cache-"
+
+Notes:
+
+* Wildcard characters "?" and "*" are allowed in directory names; and
+* If the "ifempty" flag is present, gaP will delete the directory only
+  if the directory is empty.
+
+[-file]
+Description:
+
+Delete file or files.
+
+Syntax:
+
+-file = File path
+
+Examples:
+
+-file = C:\Dir\MyFile.ini
+-file = %Temp%\*log*                 ; delete all files from "%Temp%" that contains "log" in their names
+
+Notes:
+
+* Wildcard characters "?" and "*" are allowed in file names.
+
+[-regkey]
+Description:
+
+Delete a registry key.
+
+Syntax:
+
+-regkey = Registry key [ :: ifempty] [ :: Registry flag [x86|x64]]
+
+Examples:
+
+-regkey = HKCU\Software\RegKey :: NULL :: x64
+-regkey = HKCU\Software\RegKey :: ifempty
+
+Notes:
+
+* If the "ifempty" flag is present, gaP will delete the registry key only
+  if the key is empty; and
+* If the Registry flag is not declared it defaults to "x86".
+
+[-regvalue]
+Description:
+
+Delete a registry value.
+
+Syntax:
+
+-regvalue = Registry key :: Registry value name [ :: Registry flag [x86|x64]]
+
+Examples:
+
+-regvalue = HKCU\Software\MyApp :: Lang :: x64
+
+Notes:
+
+* If the Registry flag is not declared it defaults to "x86".
+
+[attributes]
+Description:
+
+Set directory or file attributes.
+
+Syntax:
+
+attributes = File or directory path [ :: attributes separated with commas [archive|compressed|hidden|normal|offline|readonly|system|temporary]]
+
+Examples:
+
+attributes = C:\Dir :: system                              ; set "C:\Dir" to "system"
+attributes = MyFile.ini :: readonly, hidden                ; set "MyFile.ini" to "readonly" and "hidden"
+attributes = ..\MyFile.ini                                 ; set "MyFile.ini" to "normal" in parent directory
+
+Notes:
+
+* Separate multiple items with commas;
+* Available attributes: "archive", "compressed", "hidden", "normal",
+  "offline", "readonly", "system" and "temporary";
+* If no attribute is supplied the attribute defaults to "normal"; and
+* Setting directory attributes is not recursive, directory content
+  attributes will not be modified.
+
+[batch]
+Description:
+
+Execute a batch file.
+
+Syntax:
+
+batch = C:\before.bat [ :: Show or hide flag [hide|show]]
+
+Examples:
+
+batch = SubDir\before.bat :: show
+
+Notes:
+
+* If the "show" flag is present, the cmd window will show until the
+  launcher exits.
+
+[clean]
+Description:
+
+Clean "MuiCache" and "App Paths" values from registry on demand.
+
+Syntax:
+
+clean = File path to clean "MuiCache" and "App Paths" values from registry
+
+Examples:
+
+clean = App\MyExampleApp.exe
+
+Notes:
+
+* This function is different from the automatic clean on close. The "clean"
+  function cleans the entries of a specified executable while the automatic
+  clean on close cleans the entries of the launcher and the main application.
+
+[clip]
+Description:
+
+Text to put on clipboard.
+
+Syntax:
+
+clip = Text to put in the clipboard
+
+Examples:
+
+clip = Hello world!                  ; puts "Hello World!" on clipboard
+clip = *EMPTY*                       ; set clipboard empty
+
+Notes:
+
+* Set its value to "*EMPTY*" to clear clipboard.
+
+[date]
+Description:
+
+Set file date.
+
+Syntax:
+
+date = File path [ :: Date] [ :: Date type [modified|created|accessed]]
+
+Examples:
+
+date = New.7z :: 2013.12.31 23:59 :: modified              ; set "New.7z" date modified to 2013.12.31 23:59
+date = File.txt :: now :: accessed                         ; set "File.txt" date accessed to current system date
+date = File.txt                                            ; set "File.txt" date modified to current system date
+
+Notes:
+
+* "Date" is the desired date formated as "%yyyy.%mm.%dd %hh:%ii:%ss".
+  If missing, defaults to system date;
+* Setting date to "now" also sets date to current system date; and
+* "Date type" can have the values "created", "accessed" or "modified".
+  Defaults to "modified" if empty.
+
+[delay]
+Description:
+
+Milliseconds to wait before executing the next item in the config file.
+
+Syntax:
+
+delay = Time to wait in milliseconds
+
+Examples:
+
+delay = 500
+
+Notes:
+
+* None.
+
+[envvar]
+Description:
+
+Set an environment variable.
+
+Syntax:
+
+envvar = Environment variable name :: Environment variable value
+
+Examples:
+
+envvar = LANG :: English
+
+Notes:
+
+* It will be visible for the main application and its child
+  processes only.
+
+[iniread]
+Description:
+
+Read a value from an ini file and save it to an user variable.
+
+Syntax:
+
+iniread = Ini file path :: Ini section :: Ini section key :: User variable name to store the value
+
+Examples:
+
+iniread = File.ini :: SETTINGS :: Lang :: MyVar            ; read "Lang" key value to variable "MyVar"
+iniread = File.ini :: NULL :: Lang :: MyVar                ; read "Lang" key value to "MyVar" (no section)
+
+Notes:
+
+* Leave the Section segment empty to read a key that is
+  outside a section; and
+* The new variable can be used as "{MyVar}" later on.
+
+[iniwrite]
+Description:
+
+Write a key value to an ini file.
+
+Syntax:
+
+iniwrite = Ini file path :: [--]Ini section name :: Ini section key [ :: Ini section key value]
+
+Examples:
+
+iniwrite = Dir\File.ini :: SETTINGS :: Lang :: EN          ; write "Lang=EN" to "SETTINGS" section
+iniwrite = Dir\File.ini :: SETTINGS :: Lang                ; remove "Lang" key from "SETTINGS" section
+iniwrite = Dir\File.ini :: --SETTINGS                      ; delete "SETTINGS" section
+
+Notes:
+
+* If the "Ini section key value" segment is empty then
+  the "Ini section key" will be removed;
+* Leave the "Ini section name" segment empty (NULL) to
+  write a "Ini section key" without an "Ini section name";
+* If the "Ini section name" starts with "--" the entire
+  section will be deleted it's valid to the empty (NULL)
+  section too;
+* Set the "Ini section name" field value to "*NULL*" to write
+  the word "NULL" as "Ini section name"; and
+* Set the "Ini section key" or the "Ini section key value"
+  fields values to "*NULL*" to write the word "NULL" as
+  "Ini section key" or as "Ini section key value".
+
+[keeponly]  
+Description:
+
+Keep a specified number of files or folders inside a selected path
+deleting the other files or folders. 
+
+Syntax:
+
+keeponly = Path to files or folders :: Filter for files  :: Flag to indicate files or folder [file|folder] :: Sort order [ascending|descending] :: Flag to indicate the criteria to sort [modified|created|accessed|highest|lowest|name] :: Number of items to be kept
+
+Examples:
+
+keeponly = {GAPROOT}\Backup :: config.ini_Backup_* :: file :: descending :: name :: 5 
+keeponly = {GAPROOT}\Backup :: config_Backup_* :: folder :: ascending :: created :: 3
+
+Notes:
+
+Wildcard characters "?" and "*" are allowed in the filter
+for files or folders. The highest or lowest parameter will
+get the highest or lowest date among modified, created and
+accessed dates.  
+  
+[killprocess]
+Description:
+
+Terminate all instances of the specified process.
+
+Syntax:
+
+killprocess = Process name
+
+Examples:
+
+killprocess = Notepad.exe
+killprocess = Notepad*
+
+Notes:
+
+Wildcard character "*" is allowed ONLY at the end of the process name.
+
+[message]
+Description:
+
+Show a topmost dialog box with the specified message.
+
+Syntax:
+
+message = Text [ :: cancellable]
+
+Examples:
+
+message = Hello world!
+message = Commandline is: {COMMANDLINE} :: cancellable
+
+Notes:
+
+The launcher waits until the dialog box is closed. No message is
+shown if the supplied text is empty. If the "cancellable" flag
+is used, the dialog will have an extra "Cancel" button mainly for
+testing purposes. Note that when cancelling the message the launcher
+will quit so no items after the message will be executed.
+
+[nowait]
+Description:
+
+Quit after launching the main application without executing AFTER items.
+
+Syntax:
+
+nowait = 1
+
+Examples:
+
+nowait = 1
+
+Notes:
+
+None.
+
+[quit]
+Description:
+
+Terminate the launcher.
+
+Syntax:
+
+quit = 1
+
+Examples:
+
+quit = 1
+
+Notes:
+
+No AFTER items will be executed. The main application will not be
+terminated if it has been already launched. By using "quit" in the
+BEFORE section it is possible to execute items without launching
+the main application.
+
+[regdll]
+Description:
+
+Register or unregister a dll file.
+
+Syntax:
+
+regdll = Dll file path [ :: unregister]
+
+Examples:
+
+regdll = Dir\Library.dll
+regdll = Dir\Library.dll :: unregister
+
+Notes:
+
+* Administrator rights may be required for this operation.
+
+[regexport]
+Description:
+
+Export a registry key or value in a file.
+
+Syntax:
+
+regexport = Registry key or value [ :: Target file or directory path] [ :: Registry flag [x86|x64]]
+
+Examples:
+
+regexport = HKCU\Software\App\ :: C:\Dir\reginfo.reg :: x64  ; export the x64 key in "C:\Dir\reginfo.reg"
+regexport = HKCU\Software\App\ :: C:\Dir\reginfo.reg :: x86  ; export the x86 key (Wow6432Node) in "C:\Dir\reginfo.reg"
+regexport = HKCU\Software\App\ :: Dir\reginfo.reg            ; export key in "{GAPROOT}\Dir\reginfo.reg"
+regexport = HKCU\Software\App\ :: Settings\                  ; export key in "{GAPROOT}\Settings\settings.reg"
+regexport = HKCU\Software\App\                               ; export key in "{GAPROOT}\settings.reg"
+regexport = HKCU\Software\App\Lang                           ; export value in "{GAPROOT}\settings.reg"
+
+Notes:
+
+* If the target file is not set the registry key will be exported to "settings.reg" in
+  the launcher's root directory;
+* If the source is a registry key it MUST be indicated with a trailing backslash "\";
+* The registry key will be exported to "settings.reg" into the specified directory; and
+* If the Registry flag is not declared it defaults to "x86".
+
+[regimport]
+Description:
+
+Import a registry file in the registry.
+
+Syntax:
+
+regimport = RegFile.reg [ :: Registry flag [x86|x64]]
+
+Examples:
+
+regimport = Dir\reginfo.reg :: x64                           ; import the "Dir\reginfo.reg" file in x64 Registry
+regimport = Dir\reginfo.reg :: x86                           ; import the "Dir\reginfo.reg" file in x86 Registry (Wow6432Node)
+
+Notes:
+
+* If the Registry flag is not declared it defaults to "x86".
+
+[regmerge]
+Description:
+
+Merge two reg files into one.
+
+Syntax:
+
+regmerge = RegFile1.reg :: RegFile2.reg
+
+Examples:
+
+regmerge = Settings\settings.reg :: Settings\anotherfile.reg
+
+Notes:
+
+* The contents of the second reg file will be appended to the first reg file.
+
+[replace]
+Description:
+
+Replaces all occurrences of "StringToFind" with "Replacement" in a file.
+
+Syntax:
+
+replace = File path :: StringToFind :: Replacement
+
+Examples:
+
+replace = C:\MyFile.txt :: hello :: hi
+
+Notes:
+
+* None.
+
+[replaceline]
+Description:
+
+Replaces the first matching line with the "Replacement" in a file.
+
+Syntax:
+
+replaceline = File path :: Beginning of line to find :: Replacement
+
+Examples:
+
+replaceline = Settings.xml :: <checkForUpdates :: <checkForUpdates value="0"/>
+
+Notes:
+
+* None.
+
+[restore]
+Description:
+
+Indicates when should gaP run automatic AFTER items.
+
+Syntax:
+
+restore = 1
+
+Examples:
+
+restore = 1
+
+Notes:
+
+* This function works ONLY in the AFTER section; and
+* When using keywords "dir", "file", "regkey", "(dir)", "(file)",
+  "(regkey)" and "symlink" gaP automatically adds their AFTER operations
+  to the processing queue. By default these items are run right after
+  closing the main application. If the "restore" keyword with value 1 is
+  present then gaP will run these items where this keyword is found in the
+  list.
+
+[run]
+Description:
+
+Run an application.
+
+Syntax:
+
+run = Application path [ :: wait] [ :: commandline parameters] [ :: working directory]
+
+Examples:
+
+run = %Windir%\Notepad.exe :: wait :: C:\MyFile.txt :: {GAPROOT}
+run = %Windir%\Notepad.exe :: NULL :: C:\MyFile.txt :: {GAPROOT}
+run = %Windir%\Notepad.exe :: NULL :: NULL :: {GAPROOT}
+run = %Windir%\Notepad.exe
+
+Notes:
+
+* If the "wait" flag is used gaP will wait for the application to
+  terminate before processing the next config item.
+
+[service]
+Description:
+
+Create, delete, start or stop a service.
+
+Syntax:
+
+service = Service name :: Service action to be done [create|delete|start|stop] [ :: File path to create the service including commandline parameters to pass to the service] [ :: Service type to create [own|share|kernel|filesys|rec|interact own|interact share]]
+
+Examples:
+
+service = MyExampleService :: create :: %Windir%\system32\svchost.exe -k netsvcs :: own
+service = MyExampleService :: delete
+service = Spooler :: start
+service = Spooler :: stop
+
+Notes:
+
+* User must use the real name of the service not the service's
+  display name. User can use "services.msc" tool to find the 
+  "service name" under the service entry; and
+* If the Service type parameter is not declared it defaults to "own".
+
+[stringreplace]
+Description:
+
+Search and replace string in a string and save the result to a user
+variable.
+
+Syntax:
+
+stringreplace = Text :: String to find :: Replacement :: User variable
+
+Examples:
+
+stringreplace = {GAPROOT} :: \ :: // :: MyVar       ; replace all "\" to "//" in {GAPROOT} and store result in MyVar
+stringreplace = %Desktop% :: \ :: NULL :: MyVar     ; remove all "\" from %Desktop% and store result in MyVar
+
+Notes:
+
+* The new variable can be used as "{MyVar}" later on. An existing user
+  variable will be overwritten; and
+* Set the "Replacement" field value to "*NULL*" to replace the
+  "String to find" for the word "NULL".
+
+[symlink]
+Description:
+
+Create a directory or file symbolic link.
+
+Syntax:
+
+symlink = File or directory path to create the link :: Target file or directory path
+
+Examples:
+
+symlink = %Appdata%\MyDir :: Settings\MyDir
+symlink = %Appdata%\MyFile.ini :: Settings\MyFile.ini
+
+Notes:
+
+* This function works ONLY in the BEFORE section;
+* The symlink is removed when the launcher terminates; and
+* Administrator rights, NTFS file system and a compatible OS
+  are needed to successfully create a symlink. gaP checks for
+  administrator rights and for NTFS file system.
+
+[systemrefresh]
+Description:
+
+Refresh the system desktop.
+
+Syntax:
+
+systemrefresh = 1
+
+Examples:
+
+systemrefresh = 1
+
+Notes:
+
+* None.
+
+[uservar]
+Description:
+
+Add a custom user variable.
+
+Syntax:
+
+uservar = Variable name :: Variable value
+
+Examples:
+
+uservar = MyRegKey :: HKCU\Software\MyApp
+
+Notes:
+
+* Once added, it can be referenced using curly brackets, eg. "{MyRegKey}"; and
+* Adding a user variable with the same name will overwrite existing.
+
+[Variables and macros]
+
+[Path macros]
+
+{GAPROOT} absolute path of the launcher's directory
+{EXEPATH} absolute path of the main application's directory
+{APPEXE} absolute path of the main application
+{DRIVE} current drive letter of the launcher, eg. "D"
+{JAVAEXE} absolute path to installed Java executable (javaw.exe)
+{USERFILE} browse file dialog to dynamically add filepath
+{USERDIR} browse directory dialog to dynamically add path
+{WORKDIR} working directory of the main application
+
+[Text macros]
+
+{CLIPBOARD} text on clipboard
+{LINEBREAK} new line
+{USERTEXT} text input dialog to dynamically add text
+
+[Date and time macros]
+
+{d} day of the month, 2 digits with leading zeros
+{j} day of the month without leading zeros
+{m} numeric representation of a month, with leading zeros
+{n} numeric representation of a month, without leading zeros
+{Y} a full numeric representation of a year, 4 digits
+{y} a two digit representation of a year
+{g} 12-hour format of an hour without leading zeros
+{G} 24-hour format of an hour without leading zeros
+{h} 12-hour format of an hour with leading zeros
+{H} 24-hour format of an hour with leading zeros
+{i} minutes with leading zeros
+{s} seconds, with leading zeros
+{U} seconds since the Unix Epoch (January 1 1970 00:00:00 GMT)
+
+[Language and locale macros]
+
+{LANGCODE} "2057"
+{LANG} "English"
+{LOCALE} "EN"
+{LOCALENAME} "en-GB"
+{LOCALENAME_SHORT} "en"
+{COUNTRY} "United Kingdom"
+
+[Misc macros]
+
+{OSARCH} architecture type of the currently running operating system (x86, ia64 or x64)
+{COMMANDLINE} parameters passed to the main application
+{PARAMETERS} parameters passed to the launcher
+
+[User-defined variables]
+
+See keyword "uservar".
+
+[Shell folders]
+
+%Administrative Tools% %Cache% %CD Burning% %Cookies% %Desktop%
+%Documents% %Favorites% %Fonts% %History% %Local Appdata% %MyDocuments%
+%My Music% %My Pictures% %My Video% %NetHood% %Personal% %PrintHood%
+%Programs% %Recent% %SendTo% %Start Menu% %Startup% %Templates%
+%Common Administrative Tools% %Common AppData% %Common Desktop% %Common Documents%
+%Common Favorites% %Common Programs% %Common Start Menu% %Common Startup%
+%Common Templates% %CommonMusic% %CommonPictures% %CommonVideo% %OEM Links%
+
+[Environment variables]
+
+See the Wikipedia page for the complete list of environment variables
+and additional information (#4).
+
+[Frequently Asked Questions - FAQ]
+
+Q: I don't understand a thing!
+A: Though gaP is intended to be easy to use it is not for beginners. If you are looking
+   for ready made portable applications visit The Portable Freeware Collection (#5),
+   Lupo PenSuite (#6), PortableApps.com (#7), LiberKey (#8), WinPenPack (#9) or other
+   portable collection sites.
+
+Q: How can I update gaP-ped portables?
+A: Manually update main application files even if an auto update feature is
+   available. Otherwise the main application may restart itself and leave
+   settings in the system. Also check whether the new version saves
+   settings to the same locations - if not, change the configuration ini
+   accordingly.
+
+Q: Is there any directory structure convention to follow?
+A: No. gaP needs only the config file ("LauncherName.ini" or "gaP.ini") to be
+   next to the launcher executable. Application and settings files can be anywhere.
+
+Q: How can I change "gaP.exe" icon?
+A: Use a 3rd party software like PE Icon Changer (#10) or Greenfish Icon Editor Pro (#11).
+
+Q: Is gaP PortableApps format compatible?
+A: gaP is not designed to be compatible with PA but creating the extra
+   dirs/files that PA requires it can be done.
+
+Q: Can I use UPX (#12) to further reduce the launcher size?
+A: No. I have done that already to squeeze the bytes. Keep in mind that
+   some AV software may flag it as malicious due to UPX compression.
+
+Q: Can I use "HKCU" and "HKEY_CURRENT_USER" interchangeably?
+A: Yes, just like "HKLM" and "HKCR" as well.
+
+Q: Can gaP show a splash screen?
+A: No. This feature is not planned.
+
+Q: Will gaP create a directory if the parent directory is not available?
+A: Yes, gaP creates a directory tree.
+
+Q: Can I use "..\" or nested directories in paths?
+A: Yes. "+file = ..\Subdir1\Subdir2\MyFile.txt" will work.
+
+Q: What programming language is gaP written in? Is the source code available?
+A: gaP is written in AutoIt (#13). The source code is not available yet.
+
+Q: Where can I submit a new example configuration or report a bug?
+A: Visit the gaP forum topic at The Portable Freeware Collection (#14).
+
+[References]
+1) http://rolandtoth.hu/yaP/
+2) http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=5698&start=0
+3) http://legroom.net/software/uniextract
+4) https://en.wikipedia.org/wiki/Environment_variable#Default_Values_on_Microsoft_Windows%3E
+5) http://www.portablefreeware.com/
+6) http://www.lupopensuite.com/
+7) http://portableapps.com/
+8) http://www.liberkey.com/en.html
+9) http://www.winpenpack.com/
+10) http://starpunch.blogspot.com.br/2013/03/PE-Icon-Changer.html
+11) http://greenfishsoftware.blogspot.hu/2012/07/greenfish-icon-editor-pro.html
+12) http://upx.sourceforge.net/
+13) https://www.autoitscript.com/site/
+14) http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129

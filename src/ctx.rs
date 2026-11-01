@@ -1,0 +1,254 @@
+//! Estado global do lançador (`Ctx`) — equivalente às variáveis `Global` do
+//! script AutoIt — e tipos das filas de tarefas BEFORE/AFTER.
+
+use crate::{crypto, reg, sys, ui, util};
+
+pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
+pub const PROGRAM_VERSION: &str = "2.0.0.0";
+
+/// Nomes das pastas do shell aceitas como `%Nome%` (ordem do original).
+/// (nome, CSIDL de reserva, é_HKLM)
+pub const SHELL_FOLDERS: &[(&str, i32, bool)] = &[
+    ("Administrative Tools", 0x30, false),
+    ("AppData", 0x1a, false),
+    ("Cache", 0x20, false),
+    ("CD Burning", 0x3b, false),
+    ("Cookies", 0x21, false),
+    ("Desktop", 0x00, false),
+    ("Documents", 0x05, false),
+    ("Favorites", 0x06, false),
+    ("Fonts", 0x14, false),
+    ("History", 0x22, false),
+    ("Local AppData", 0x1c, false),
+    ("MyDocuments", 0x05, false),
+    ("My Music", 0x0d, false),
+    ("My Pictures", 0x27, false),
+    ("My Video", 0x0e, false),
+    ("NetHood", 0x13, false),
+    ("Personal", 0x05, false),
+    ("PrintHood", 0x1b, false),
+    ("Programs", 0x02, false),
+    ("Recent", 0x08, false),
+    ("SendTo", 0x09, false),
+    ("Start Menu", 0x0b, false),
+    ("Startup", 0x07, false),
+    ("Templates", 0x15, false),
+    ("Common Administrative Tools", 0x2f, true),
+    ("Common AppData", 0x23, true),
+    ("Common Desktop", 0x19, true),
+    ("Common Documents", 0x2e, true),
+    ("Common Favorites", 0x1f, true),
+    ("Common Programs", 0x17, true),
+    ("Common Start Menu", 0x16, true),
+    ("Common Startup", 0x18, true),
+    ("Common Templates", 0x2d, true),
+    ("CommonMusic", 0x35, true),
+    ("CommonPictures", 0x36, true),
+    ("CommonVideo", 0x37, true),
+    ("OEM Links", 0x3a, true),
+];
+
+/// Macros de função (`FuncArray`): avaliadas a cada uso.
+pub const FUNC_MACROS: &[&str] = &[
+    "LANGCODE", "USERDIR", "USERFILE", "USERTEXT", "CLIPBOARD", "d", "j", "m", "n", "Y", "y", "H", "G", "h", "g",
+    "i", "s", "U", "LANG", "LOCALE", "LOCALENAME", "LOCALENAME_SHORT", "COUNTRY",
+];
+
+/// Macros de valor reservadas (não podem ser redefinidas por `uservar`).
+pub const RESERVED_VARS: &[&str] = &[
+    "GAPROOT", "EXEPATH", "APPEXE", "DRIVE", "WORKDIR", "LINEBREAK", "COMMANDLINE", "PARAMETERS", "JAVAEXE", "OSARCH",
+];
+
+/// Tarefas geradas pelo próprio programa (linhas "PROG" do original).
+/// Guardam caminhos/valores JÁ expandidos — não há dupla expansão de macros.
+#[derive(Clone, Debug)]
+pub enum Prog {
+    LtrDir { src: String, tgt: String, mv: bool, ow: bool },
+    LtrFile { src: String, tgt: String, mv: bool, ow: bool },
+    RegExport { key: String, file: String, view: reg::View },
+    MinusRegKey { key: String, if_empty: bool, view: reg::View },
+    MinusRegValue { key: String, name: String, view: reg::View },
+    LtrRegKey { src: String, tgt: String, mv: bool, view: reg::View },
+    LtrRegValue { src: String, tgt: String, mv: bool, view: reg::View },
+    SymlinkRemove { link: String, is_dir: bool },
+    /// Remove chaves-pai vazias sob HKCU/HKLM\Software (comportamento da ajuda).
+    CleanParents { key: String, view: reg::View },
+}
+
+#[derive(Clone, Debug)]
+pub enum TaskKind {
+    /// Item escrito pelo usuário no .ini: palavra-chave normalizada + argumentos.
+    User { kw: String, args: Vec<String>, raw_key: String, raw_val: String },
+    #[allow(dead_code)]
+    Prog(Prog),
+    Done,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Section {
+    Before,
+    After,
+}
+
+impl Section {
+    pub fn name(self) -> &'static str {
+        match self {
+            Section::Before => "BEFORE",
+            Section::After => "AFTER",
+        }
+    }
+}
+
+pub struct Logger {
+    pub path: String,
+}
+
+impl Logger {
+    pub fn write(&self, text: &str) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.path) {
+            let _ = writeln!(f, "{}", text);
+        }
+    }
+}
+
+pub struct Ctx {
+    pub script_full: String,
+    pub script_dir: String,
+    pub exe_name: String,
+    pub title: String,
+    pub ini_path: String,
+    pub file_hash: String,
+    pub cmd_raw: String,
+    pub os_arch: &'static str,
+
+    pub is_readonly: bool,
+    pub first_instance: bool,
+    pub run_after: bool,
+    pub wait_main: bool,
+    pub debug: Option<Logger>,
+
+    pub vars: Vec<(String, String)>,
+    pub shell: Vec<(String, String)>,
+    pub common_appdata: String,
+
+    pub main_app: Option<String>,
+    pub main_cmdline: String,
+    pub main_workdir: String,
+    pub show_state: u16,
+    pub waitprocess: String,
+
+    pub before: Vec<TaskKind>,
+    pub after: Vec<TaskKind>,
+    /// Tarefas automáticas da seção AFTER (linhas "PROG"): sempre antes das do usuário.
+    pub after_prog: Vec<Prog>,
+    pub pw_cache: Option<String>,
+}
+
+impl Ctx {
+    pub fn new() -> Ctx {
+        let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let exe = exe.trim_start_matches("\\\\?\\").to_string();
+        let script_full = util::path_full(&exe, "C:\\");
+        let (dir, file) = util::split_parent(&script_full);
+        let script_dir = if dir.len() == 2 && dir.ends_with(':') { format!("{}\\", dir) } else { dir };
+        let exe_name = match file.rfind('.') {
+            Some(i) if i > 0 => file[..i].to_string(),
+            _ => file.clone(),
+        };
+        let title = format!("{} - {}", exe_name, PROGRAM_NAME);
+        let ini_path = format!("{}\\{}.ini", script_dir.trim_end_matches('\\'), exe_name);
+        let mut c = Ctx {
+            file_hash: crypto::sha1_file(&script_full),
+            script_full,
+            script_dir,
+            exe_name,
+            title,
+            ini_path,
+            cmd_raw: sys::cmdline_raw(),
+            os_arch: sys::os_arch(),
+            is_readonly: false,
+            first_instance: true,
+            run_after: true,
+            wait_main: true,
+            debug: None,
+            vars: Vec::new(),
+            shell: Vec::new(),
+            common_appdata: String::new(),
+            main_app: None,
+            main_cmdline: String::new(),
+            main_workdir: String::new(),
+            show_state: 5,
+            waitprocess: String::new(),
+            before: Vec::new(),
+            after: Vec::new(),
+            after_prog: Vec::new(),
+            pw_cache: None,
+        };
+        c.init_vars();
+        c.init_shell_folders();
+        c
+    }
+
+    /// `VarFuncIni()`: macros de valor iniciais.
+    fn init_vars(&mut self) {
+        let root = self.script_dir.trim_end_matches('\\').to_string();
+        let drive: String = self.script_dir.chars().take(1).collect();
+        self.add_var("GAPROOT", &root);
+        self.add_var("DRIVE", &drive);
+        self.add_var("LINEBREAK", "\r\n");
+        self.add_var("PARAMETERS", &self.cmd_raw.clone());
+        self.add_var("OSARCH", self.os_arch);
+    }
+
+    /// `CreateShellFolders()`: lê "Shell Folders" (HKCU/HKLM); usa a API do shell
+    /// como reserva quando a chave do registro não existe.
+    fn init_shell_folders(&mut self) {
+        for (name, csidl, hklm) in SHELL_FOLDERS {
+            let key = if *hklm {
+                "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
+            } else {
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
+            };
+            let val = reg::read_string(key, name, reg::View::Native)
+                .filter(|s| !s.is_empty())
+                .or_else(|| sys::csidl_path(*csidl))
+                .unwrap_or_default();
+            self.shell.push((name.to_string(), val));
+        }
+        let ca = self.shell.iter().find(|(n, _)| n == "Common AppData").map(|(_, v)| v.clone()).unwrap_or_default();
+        self.common_appdata = format!("{}\\", ca);
+    }
+
+    pub fn add_var(&mut self, name: &str, value: &str) {
+        if let Some(e) = self.vars.iter_mut().find(|(n, _)| n == name) {
+            e.1 = value.to_string();
+        } else {
+            self.vars.push((name.to_string(), value.to_string()));
+        }
+    }
+
+    pub fn get_var(&self, name: &str) -> Option<&str> {
+        self.vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
+    }
+
+    pub fn msg(&self, text: &str) {
+        ui::info(&self.title, text);
+    }
+
+    pub fn log(&self, text: &str) {
+        if let Some(l) = &self.debug {
+            l.write(text);
+        }
+    }
+
+    /// Mensagem padrão de "função chamada na seção errada".
+    pub fn wrong_section(&self, kw: &str, section: Section) {
+        self.msg(&format!("The \"{}\" function can't be called from the \"{}\" section.", kw, section.name()));
+    }
+}
+
+/// `Exit`: encerra sem limpeza adicional (como no AutoIt).
+pub fn exit_now() -> ! {
+    std::process::exit(0)
+}

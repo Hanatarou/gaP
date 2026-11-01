@@ -1,0 +1,3335 @@
+#NoTrayIcon
+#Region ;**** Directives created by AutoIt3Wrapper_GUI ****
+#AutoIt3Wrapper_Icon=G:\Arquivos Auxiliares\Manuten��o e Diagn�stico\[Meus Programas]\gaP\Modules\Icon\Icon_Final.ico
+#AutoIt3Wrapper_Outfile=gaP.exe
+#AutoIt3Wrapper_Compression=4
+#AutoIt3Wrapper_Res_Comment=gaP: great! another Portabilizer
+#AutoIt3Wrapper_Res_Description=gaP: great! another Portabilizer
+#AutoIt3Wrapper_Res_Fileversion=1.1.5.0
+#AutoIt3Wrapper_Res_ProductVersion=1.1.5.0
+#AutoIt3Wrapper_Res_LegalCopyright=Copyright � 2015 Aeolis
+#AutoIt3Wrapper_Res_Language=1033
+#AutoIt3Wrapper_Res_requestedExecutionLevel=asInvoker
+#AutoIt3Wrapper_Res_Field=ProductName|gaP: great! another Portabilizer
+#AutoIt3Wrapper_Res_Field=AutoIt Version|%AutoItVer%
+#AutoIt3Wrapper_Res_Field=Compile Date|%longdate%, %time%
+#AutoIt3Wrapper_Res_File_Add=G:\Arquivos Auxiliares\Manuten��o e Diagn�stico\[Meus Programas]\gaP\Modules\Icon\Icon_Final_80.bmp, RT_BITMAP, GAP_LOGO, 0
+#EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
+;
+;
+; AutoIt Version:  3.3.14.2
+; Language:        English
+; Platform:        Windows
+; Authors:         Aeolis (http://www.portablefreeware.com/forums/)
+;
+; Script Function:
+;   gaP: great! another Portabilizer
+;
+; License:		gaP is released as freeware. You are allowed to use; distribute gaP via floppy disk, CD-ROM, Internet, or in any other way, as long as you
+;				don't charge anything for this; and modify as you like it. The author is not liable for any damages arising from its use.
+;
+;				This program is distributed as freeware in the hope that it will be useful, but without any warranty expressed or implied. You are free to
+;				modify gaP, but the author would like you to share your changes with him and do not take credit for work you did not do.
+;
+; Disclaimer:	gaP is provided "AS IS" and "WITH ALL FAULTS" without any warranty, either expressed or implied, including, but not limited to, the implied
+;				warranties of merchantability and fitness for a particular purpose. The author will not be liable for any special, incidental, consequential
+;				or indirect damages due to loss of data or any other reason. The author makes no representations or warranties of any kind concerning the
+;				safety, suitability, lack of viruses, inaccuracies, typographical errors, or other harmful components of gaP.
+;
+;				There are inherent dangers in the use of any software, and you are solely responsible for determining whether gaP is compatible with your
+;				equipment and other software installed on your equipment. You are also solely responsible for the protection of your equipment and backup
+;				of your data, and the author will not be liable for any damages you may suffer in connection with using, modifying or distributing gaP.
+;
+; Last Modified: 30/MAY/2015
+;
+; Change-log:
+; v1.1.5.0 - 08/AUG/2015 - Fixed a major bug and changed the AutoIt core from 3.3.14.0 to 3.3.14.1.
+
+; Directives
+#include <Array.au3>
+#include <Crypt.au3>
+#include <Date.au3>
+#include <File.au3>
+#include <ResourcesEx.au3>
+#include <WinAPIProc.au3>
+
+; Options
+AutoItSetOption("ExpandEnvStrings", 1)
+AutoItSetOption("WinTitleMatchMode", 2)
+AutoItSetOption("MustDeclareVars", 1)
+
+; Global
+Global Const $gapFileHash = HashFile(@ScriptFullPath)
+Global Const $ProgramName = "gaP: great! another Portabilizer"
+Global Const $ProgramVersion = "1.1.5.0"
+Global $gapExeDrive = ""
+Global $gapExeDir = ""
+Global $gapExeName = ""
+Global $gapExeExt = ""
+Global $gapExeArray = _PathSplit(@ScriptFullPath, $gapExeDrive, $gapExeDir, $gapExeName, $gapExeExt)
+Global Const $gapTitle = $gapExeName & " - " & $ProgramName
+Global $gapIniFilePath = @ScriptDir & "\" & $gapExeName & ".ini"
+
+; Global Flags
+Global $IsReadOnly = 0
+Global $gaPFirstInstance = 1
+Global $RunBeforeSec = 1
+Global $RunAfterSec = 1
+Global $gapWait = 1
+
+; Program Entry Point
+
+Switch $CmdLineRaw
+	Case "-crypt"
+		; Encryption and Decryption Module GUI - Start
+		Opt("GUIOnEventMode", 1)
+		Local $CryptModule = GUICreate("Encryption and Decryption Module - " & $ProgramName, 530, 210, -1, -1)
+		GUISetBkColor(0xFFFFFF, $CryptModule)
+		Local $Passwordbox = GUICtrlCreateInput("Write the password to encrypt or decrypt here.", 70, 16, 270, 21)
+		Local $PasswordBoxLabel = GUICtrlCreateLabel("Password:", 8, 18, 56, 17)
+		Local $ComboBox1 = GUICtrlCreateCombo("", 360, 16, 161, 25, BitOR(0x0002,0x0040))
+		Local $ComBox1List = GUICtrlSetData($ComboBox1, "Encrypt|Decrypt", "Encrypt")
+		Local $InputBox1 = GUICtrlCreateInput("Write the text to encrypt or decrypt here.", 70, 48, 451, 21)
+		Local $InputBox1Label = GUICtrlCreateLabel("Input text:", 8, 50, 60, 17)
+		Local $InputBox2 = GUICtrlCreateInput("Read the encrypted or decrypted text here.", 70, 80, 451, 21, 0)
+		Local $InputBox2Label = GUICtrlCreateLabel("Output text:", 8, 82, 60, 17)
+		Local $InputBox2Color = GUICtrlSetBkColor($InputBox2, 0xFFFFE1)
+		Local $InputBox2State = GUICtrlSetState($InputBox2, 128)
+		Local $ClipboardButton = GUICtrlCreateButton("Copy to clipboard", 392, 112, 129, 85)
+		Local $WarningLabel = GUICtrlCreateLabel("WARNING: This encryption module uses AES 256 bit algorithm to encrypt or decrypt your data. There is no perfect encryption available and gaP encryption and decryption module IS NOT an exception. However, choosing a strong password will make decoding very hard for the average computer user." & @CRLF & @CRLF & "WARNING: Even if you launch the main application with encrypted command line parameters, gaP will pass unencrypted data to the application which may be visible to other applications.", 8, 110, 370, 90)
+		Local $WarningLabelFont = GUICtrlSetFont($WarningLabel, 7, 700)
+		GUICtrlSetOnEvent($ClipboardButton, "ClipboardButtonClick")
+		GUISetOnEvent(-3, "CloseGUI")
+		GUISetState(@SW_SHOW)
+		; Encryption and Decryption Module GUI - End
+		; Encryption and Decryption Module GUI Code - Start
+		_ReduceMemory(0)
+		While 1
+			Sleep(100)
+			CryptChange()
+		WEnd
+		; Encryption and Decryption Module GUI Code - End
+
+	Case "-license"
+		; License GUI - Start
+		Opt("GUIOnEventMode", 1)
+		Local $LicenseGUI = GUICreate("License and Disclaimer - " & $ProgramName, 530, 345, -1, -1)
+		GUISetBkColor(0xFFFFFF, $LicenseGUI)
+		Local $SaveLicenseButton = GUICtrlCreateButton("Save license", 200, 305, 130, 30)
+		Local $LicenseLabel = GUICtrlCreateLabel("LICENSE" & @CRLF & @CRLF & "gaP is released as freeware. You are allowed to use; distribute gaP via floppy disk, CD-ROM, Internet, or in any other way, as long as you don't charge anything for this; and modify as you like it. The author is not liable for any damages arising from its use." & @CRLF & @CRLF & "This program is distributed as freeware in the hope that it will be useful, but without any warranty expressed or implied. You are free to modify gaP, but the author would like you to share your changes with him and do not take credit for work you did not do." & @CRLF & @CRLF & "DISCLAIMER" & @CRLF & @CRLF & "gaP is provided ""AS IS"" and ""WITH ALL FAULTS"" without any warranty, either expressed or implied, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose. The author will not be liable for any special, incidental, consequential or indirect damages due to loss of data or any other reason. The author makes no representations or warranties of any kind concerning the safety, suitability, lack of viruses, inaccuracies, typographical errors, or other harmful components of gaP." & @CRLF & @CRLF & "There are inherent dangers in the use of any software, and you are solely responsible for determining whether gaP is compatible with your equipment and other software installed on your equipment. You are also solely responsible for the protection of your equipment and backup of your data, and the author will not be liable for any damages you may suffer in connection with using, modifying or distributing gaP.", 8, 8, 515, 290)
+		GUICtrlSetOnEvent($SaveLicenseButton, "SaveLicenseButtonClick")
+		GUISetOnEvent(-3, "CloseGUI")
+		GUISetState(@SW_SHOW)
+		; License GUI - End
+		; License GUI Code - Start
+		_ReduceMemory(0)
+		While 1
+			Sleep(100)
+		WEnd
+		; License GUI Code - End
+
+	Case "-about"
+		; About GUI - Start
+		Opt("GUIOnEventMode", 1)
+		Local $AboutGUI = GUICreate("About - " & $ProgramName, 390, 178, -1, -1)
+		GUISetBkColor(0xFFFFFF, $AboutGUI)
+		Local $AboutLabel1 = GUICtrlCreateLabel("ABOUT", 8, 8, 47, 13)
+		Local $AboutLabel2 = GUICtrlCreateLabel("Program name: " & $ProgramName, 8, 32, 220, 21)
+		Local $AboutLabel3 = GUICtrlCreateLabel("Program version: " & $ProgramVersion, 8, 55, 167, 21)
+		Local $AboutLabel4 = GUICtrlCreateLabel("Author: Aeolis", 8, 79, 71, 21)
+		Local $AboutLabel5 = GUICtrlCreateLabel("Collaborators: tproli and all The Portable Freeware Collection Forums members", 8, 102, 380, 13)
+		Local $AboutLabel6 = GUICtrlCreateLabel("Credits: AutoIt creators and all AutoIt Forums members", 8, 125, 380, 13)
+		Local $gapHomepageLabel = GUICtrlCreateLabel("gaP homepage:", 8, 149, 76, 17)
+		Local $gapHomepageHyperlink = GUICtrlCreateLabel("gaP homepage", 86, 149, 85, 17)
+		Local $gapLogo = GUICtrlCreatePic("", 300, 8, 80, 80)
+		Local $hgapLogo = _Resource_GetAsBitmap("GAP_LOGO", 2)
+		_Resource_SetBitmapToCtrlID($gapLogo, $hgapLogo)
+		GUICtrlSetFont($gapHomepageHyperlink, 8, 700, 4, "MS Sans Serif")
+		GUICtrlSetColor($gapHomepageHyperlink, 0x0000C0)
+		GUICtrlSetCursor($gapHomepageHyperlink, 0)
+		GUICtrlSetOnEvent($gapHomepageHyperlink, "gapHomepageButtonClick")
+		GUISetOnEvent(-3, "CloseGUI")
+		GUISetState(@SW_SHOW)
+		; About GUI - End
+		; About GUI Code - Start
+		_ReduceMemory(0)
+		While 1
+			Sleep(100)
+		WEnd
+		; About GUI Code - End
+
+	Case "-help"
+		_ReduceMemory(0)
+		FileInstall("G:\Arquivos Auxiliares\Manuten��o e Diagn�stico\[Meus Programas]\gaP\Modules\Help\gaP_Help.txt", @ScriptDir & "\gaP_Help.txt", 0)
+		CleanMUICache()
+		CleanAppPaths()
+		Exit
+
+	Case Else
+		; gaP variables and functions arrays initialization - Start
+		_ReduceMemory(0)
+		VarFuncIni()
+		CreateShellFolders()
+		_ReduceMemory(0)
+		; gaP variables and functions arrays initialization - End
+		; Initialization and reading of general settings - Start
+		; Read only test - Start
+		ReadOnlyIni()
+		; Read only test - End
+		If FileExists($gapIniFilePath) Then
+			; Opening the gap ini file - Start
+			Local $gapIniFile = FileOpen($gapIniFilePath, 0)
+			If $gapIniFile = -1 Then
+				MsgBox(64, $gapTitle, "An error occurred when opening and reading the """ & $gapExeName & ".ini"" file.")
+				Exit
+			EndIf
+			; Opening the gap ini file - End
+			;
+			JavaEarlyIni()
+			;
+			MainAppIni()
+			;
+			CmdLineIni()
+			;
+			MainAppWorkDirIni()
+			;
+			MultipleInstIni()
+			;
+			DebugLogIni()
+			;
+			IsAdminIni()
+			;
+			DotNetIni()
+			;
+			JavaFullIni()
+			;
+			OnlineIni()
+			;
+			OSIni()
+			;
+			WaitIni()
+			;
+		Else
+			Select
+				Case $IsReadOnly = 0
+					Local $IniNotFound = MsgBox(33, $gapTitle, "No "".ini"" file found. Do you want to create a new one?")
+					If $IniNotFound = 1 Then FileInstall("G:\Arquivos Auxiliares\Manuten��o e Diagn�stico\[Meus Programas]\gaP\Modules\Ini\gaP.ini", $gapIniFilePath, 0)
+					CleanMUICache()
+					CleanAppPaths()
+					Exit
+
+				Case $IsReadOnly = 1
+					CleanMUICache()
+					CleanAppPaths()
+					Exit
+
+			EndSelect
+		EndIf
+		; Initialization and reading of general settings - End
+		; Cleaning traces of gaP and main application - Start
+		_ReduceMemory(0)
+		CleanMUICache()
+		CleanAppPaths()
+		_ReduceMemory(0)
+		; Cleaning traces of gaP and main application - End
+		; Initialization of the before section - Start
+		BeforeSecIni()
+		; Initialization of the before section - End
+		_ReduceMemory(0)
+		; Initialization of the after section - Start
+		AfterSecIni()
+		; Initialization of the after section - End
+		; Closing the gap ini file - Start
+		FileClose($gapIniFile)
+		; Closing the gap ini file - End
+		_ReduceMemory(0)
+		; Processing the before section - Start
+		BeforeSecProc()
+		; Processing the before section - End
+		_ReduceMemory(0)
+		; Running the main application - Start
+		RunMainAppProc()
+		; Running the main application - End
+		; Cleaning traces of gaP and main application - Start
+		_ReduceMemory(0)
+		CleanMUICache()
+		CleanAppPaths()
+		_ReduceMemory(0)
+		; Cleaning traces of gaP and main application - End
+		; Processing the after section - Start
+		AfterSecProc()
+		; Processing the after section - End
+		; Cleaning traces of gaP and main application - Start
+		_ReduceMemory(0)
+		CleanMUICache()
+		CleanAppPaths()
+		; Cleaning traces of gaP and main application - End
+EndSwitch
+; Finished!
+; ===============================================================================================================
+; Below this line live the functions.
+; ===============================================================================================================
+;
+;===============================================================================================================
+; Function:		CreateShellFolders()
+;===============================================================================================================
+Func CreateShellFolders()
+	Global $ShellFArray[38]
+	_ArrayColInsert($ShellFArray, 1)
+	$ShellFArray[0][0] = 37
+	$ShellFArray[1][0] = "Administrative Tools"
+	$ShellFArray[2][0] = "AppData"
+	$ShellFArray[3][0] = "Cache"
+	$ShellFArray[4][0] = "CD Burning"
+	$ShellFArray[5][0] = "Cookies"
+	$ShellFArray[6][0] = "Desktop"
+	$ShellFArray[7][0] = "Documents"
+	$ShellFArray[8][0] = "Favorites"
+	$ShellFArray[9][0] = "Fonts"
+	$ShellFArray[10][0] = "History"
+	$ShellFArray[11][0] = "Local AppData"
+	$ShellFArray[12][0] = "MyDocuments"
+	$ShellFArray[13][0] = "My Music"
+	$ShellFArray[14][0] = "My Pictures"
+	$ShellFArray[15][0] = "My Video"
+	$ShellFArray[16][0] = "NetHood"
+	$ShellFArray[17][0] = "Personal"
+	$ShellFArray[18][0] = "PrintHood"
+	$ShellFArray[19][0] = "Programs"
+	$ShellFArray[20][0] = "Recent"
+	$ShellFArray[21][0] = "SendTo"
+	$ShellFArray[22][0] = "Start Menu"
+	$ShellFArray[23][0] = "Startup"
+	$ShellFArray[24][0] = "Templates"
+	$ShellFArray[25][0] = "Common Administrative Tools"
+	$ShellFArray[26][0] = "Common AppData"
+	$ShellFArray[27][0] = "Common Desktop"
+	$ShellFArray[28][0] = "Common Documents"
+	$ShellFArray[29][0] = "Common Favorites"
+	$ShellFArray[30][0] = "Common Programs"
+	$ShellFArray[31][0] = "Common Start Menu"
+	$ShellFArray[32][0] = "Common Startup"
+	$ShellFArray[33][0] = "Common Templates"
+	$ShellFArray[34][0] = "CommonMusic"
+	$ShellFArray[35][0] = "CommonPictures"
+	$ShellFArray[36][0] = "CommonVideo"
+	$ShellFArray[37][0] = "OEM Links"
+	For $ShellFArrayi = 1 To 24
+		$ShellFArray[$ShellFArrayi][1] = RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders", $ShellFArray[$ShellFArrayi][0])
+	Next
+	For $ShellFArrayi = 25 To $ShellFArray[0][0]
+		$ShellFArray[$ShellFArrayi][1] = RegRead("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders", $ShellFArray[$ShellFArrayi][0])
+	Next
+	Global $CommonAppData = $ShellFArray[26][1] & "\"
+EndFunc   ;==>CreateShellFolders
+;
+;===============================================================================================================
+; Function:		VarFuncIni()
+;===============================================================================================================
+Func VarFuncIni()
+	Global $VarArray[2]
+	_ArrayColInsert($VarArray, 0)
+	$VarArray[0][0] = 1
+	$VarArray[1][0] = "GAPROOT"
+	$VarArray[1][1] = $gapExeDrive & StringReplace($gapExeDir, "\", "", -1, 1)
+	Global $FuncArray[2]
+	_ArrayColInsert($FuncArray, 0)
+	$FuncArray[0][0] = 1
+	$FuncArray[1][0] = "LANGCODE"
+	$FuncArray[1][1] = "langcode"
+	addvar("MAINPROGRAM", "DRIVE", StringReplace($gapExeDrive, ":", ""), "V")
+	addvar("MAINPROGRAM", "LINEBREAK", @CRLF, "V")
+	addvar("MAINPROGRAM", "PARAMETERS", $CmdLineRaw, "V")
+	addvar("MAINPROGRAM", "OSARCH", StringLower(@OSArch), "V")
+	addvar("MAINPROGRAM", "USERDIR", "userdir", "F")
+	addvar("MAINPROGRAM", "USERFILE", "userfile", "F")
+	addvar("MAINPROGRAM", "USERTEXT", "usertext", "F")
+	addvar("MAINPROGRAM", "CLIPBOARD", "ClipGet", "F")
+	addvar("MAINPROGRAM", "d", "day2", "F")
+	addvar("MAINPROGRAM", "j", "day1", "F")
+	addvar("MAINPROGRAM", "m", "mon2", "F")
+	addvar("MAINPROGRAM", "n", "mon1", "F")
+	addvar("MAINPROGRAM", "Y", "year4", "F")
+	addvar("MAINPROGRAM", "y", "year2", "F")
+	addvar("MAINPROGRAM", "H", "hour242", "F")
+	addvar("MAINPROGRAM", "G", "hour241", "F")
+	addvar("MAINPROGRAM", "h", "hour122", "F")
+	addvar("MAINPROGRAM", "g", "hour121", "F")
+	addvar("MAINPROGRAM", "i", "min2", "F")
+	addvar("MAINPROGRAM", "s", "sec2", "F")
+	addvar("MAINPROGRAM", "U", "sEPOCH", "F")
+	addvar("MAINPROGRAM", "LANG", "lang", "F")
+	addvar("MAINPROGRAM", "LOCALE", "locale", "F")
+	addvar("MAINPROGRAM", "LOCALENAME", "localename", "F")
+	addvar("MAINPROGRAM", "LOCALENAME_SHORT", "localenameshort", "F")
+	addvar("MAINPROGRAM", "COUNTRY", "country", "F")
+EndFunc   ;==>VarFuncIni
+;
+;===============================================================================================================
+; Function:		ReadOnlyIni()
+;===============================================================================================================
+Func ReadOnlyIni()
+	Local $ReadOnlyCheck = FileOpen(@ScriptDir & "\@#$readonly@#$", 9)
+	If $ReadOnlyCheck = -1 Then
+		$IsReadOnly = 1
+		Local $ReadOnly = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!readonly", "1"))
+		Select
+			Case $ReadOnly = -2
+				CleanMUICache()
+				CleanAppPaths()
+				Exit
+
+			Case $ReadOnly = -1
+				MsgBox(64, $gapTitle, Chr(34) & $gapExeName & ".exe" & Chr(34) & " is running from a read only drive. " & _
+				"Some applications may not work as expected in this mode. " & Chr(34) & $gapExeName & ".exe" & Chr(34) & " will " & _
+				"not be able to update configuration changes in files stored in a read only drive.")
+				CleanMUICache()
+				CleanAppPaths()
+				Exit
+
+			Case $ReadOnly = 1
+				MsgBox(64, $gapTitle, Chr(34) & $gapExeName & ".exe" & Chr(34) & " is running from a read only drive. " & _
+				"Some applications may not work as expected in this mode. " & Chr(34) & $gapExeName & ".exe" & Chr(34) & " will " & _
+				"not be able to update configuration changes in files stored in a read only drive.")
+
+		EndSelect
+	Else
+		FileClose($ReadOnlyCheck)
+		FileDelete(@ScriptDir & "\@#$readonly@#$")
+		$IsReadOnly = 0
+	EndIf
+EndFunc   ;==>ReadOnlyIni
+;
+;===============================================================================================================
+; Function:		DebugLogIni()
+;===============================================================================================================
+Func DebugLogIni()
+	Global $DebugLog = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!debug", "0"))
+	If $gaPFirstInstance = 0 Then $DebugLog = 0
+	If $DebugLog = 1 Then
+		If $IsReadOnly = 0 Then
+			DirCreate(@ScriptDir & "\Logs")
+			Local $DebugLogFileName = $gapExeName & "_" & @YEAR & "." & @MON & "." & @MDAY & "." & @HOUR & "." & @MIN & "." & @SEC & "." & "log"
+			Global $DebugLogFile = @ScriptDir & "\Logs\" & $DebugLogFileName
+		EndIf
+		If $IsReadOnly = 1 Then
+			DirCreate($CommonAppData & "gaPLogs")
+			Local $DebugLogFileName = $gapExeName & "_" & @AutoItPID & "_" & @YEAR & "." & @MON & "." & @MDAY & "." & @HOUR & "." & @MIN & "." & @SEC & "." & "log"
+			Global $DebugLogFile = $CommonAppData & "gaPLogs\" & $DebugLogFileName
+		EndIf
+		Local $DebugLogFileOpen = FileOpen($DebugLogFile, 9)
+		If $DebugLogFileOpen <> -1 Then
+			FileWriteLine($DebugLogFileOpen, "######################gaP Log Header######################")
+			FileWriteLine($DebugLogFileOpen, StringFormat("%-57s", "#  Date(DD/MM/YYYY - HH:MM:SS): " & @MDAY & "/" & @MON & "/" & @YEAR & " - " & @HOUR & ":" & @MIN & ":" & @SEC) & "#")
+			FileWriteLine($DebugLogFileOpen, StringFormat("%-57s", "#  gaP Version: " & $ProgramVersion) & "#")
+			FileWriteLine($DebugLogFileOpen, StringFormat("%-57s", "#  Host OS: " & StringReplace(StringReplace(@OSVersion, "WIN_", "Windows ", 0, 0), "81", "8.1", 0, 0)) & "#")
+			FileWriteLine($DebugLogFileOpen, StringFormat("%-57s", "#  Host Architecture: " & StringLower(@OSArch)) & "#")
+			FileWriteLine($DebugLogFileOpen, "######################gaP Log Header######################")
+			FileWriteLine($DebugLogFileOpen, @CRLF)
+		EndIf
+		DebugLogWrite("MAINPROGRAM", "[Shell Folders]", 0, 0)
+		DebugLogWrite("MAINPROGRAM", $ShellFArray, 1, 1)
+		FileClose($DebugLogFileOpen)
+	EndIf
+EndFunc   ;==>DebugLogIni
+;
+;===============================================================================================================
+; Function:		DebugLogWrite()
+;===============================================================================================================
+Func DebugLogWrite($dlwFCaller, $dlwFInput, $dlwFIsArray, $dlwFAddLine)
+	If $dlwFCaller = "MAINPROGRAM" Then
+		Local $DebugLogFileOpen = FileOpen($DebugLogFile, 9)
+		If $DebugLogFileOpen <> -1 Then
+			If $dlwFIsArray = 0 Then
+				FileWriteLine($DebugLogFileOpen, $dlwFInput)
+			Else
+				_FileWriteFromArray($DebugLogFileOpen, $dlwFInput, 1)
+			EndIf
+			If $dlwFAddLine = 1 Then FileWriteLine($DebugLogFileOpen, @CRLF)
+		EndIf
+		FileClose($DebugLogFileOpen)
+	Else
+		Local $dlwFError = MsgBox(64, $gapTitle, "The ""DebugLogWrite"" function can't be called from the """ & $dlwFCaller & """ section.")
+	EndIf
+EndFunc   ;==>DebugLogWrite
+;
+;===============================================================================================================
+; Function:		JavaEarlyIni()
+;===============================================================================================================
+Func JavaEarlyIni()
+	If @OSArch = "x86" Then Global $JavaCurrent = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment", "CurrentVersion")
+	If @OSArch = "x64" Then Global $JavaCurrent = RegRead("HKEY_LOCAL_MACHINE64\SOFTWARE\JavaSoft\Java Runtime Environment", "CurrentVersion")
+	If $JavaCurrent = "" And @OSArch = "x64" Then $JavaCurrent = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment", "CurrentVersion")
+	$JavaCurrent = StringRegExp($JavaCurrent, "(?i)\d\.\d", 1)
+	If $JavaCurrent <> 0 Then
+		If @OSArch = "x86" Then Local $JavaExe = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment\" & $JavaCurrent[0], "JavaHome")
+		If @OSArch = "x64" Then Local $JavaExe = RegRead("HKEY_LOCAL_MACHINE64\SOFTWARE\JavaSoft\Java Runtime Environment\" & $JavaCurrent[0], "JavaHome")
+		If $JavaExe = "" And @OSArch = "x64" Then $JavaExe = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment\" & $JavaCurrent[0], "JavaHome")
+		If $JavaExe = "" Then
+			$JavaExe = "There is no Java Runtime Environment installed."
+		Else
+			$JavaExe = $JavaExe & "\javaw.exe"
+		EndIf
+	Else
+		Local $JavaExe = "There is no Java Runtime Environment installed."
+	EndIf
+	addvar("MAINPROGRAM", "JAVAEXE", $JavaExe, "V")
+EndFunc   ;==>JavaEarlyIni
+;
+;===============================================================================================================
+; Function:		JavaFullIni()
+;===============================================================================================================
+Func JavaFullIni()
+	Local $Java = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!java", ""))
+	If Not $Java = "" Then
+		Local $JavaVersions = "EMPTY"
+		If @OSArch = "x86" Then Local $Java6 = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment", "Java6FamilyVersion")
+		If @OSArch = "x64" Then Local $Java6 = RegRead("HKEY_LOCAL_MACHINE64\SOFTWARE\JavaSoft\Java Runtime Environment", "Java6FamilyVersion")
+		If $Java6 = "" And @OSArch = "x64" Then $Java6 = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment", "Java6FamilyVersion")
+		If @OSArch = "x86" Then Local $Java7 = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment", "Java7FamilyVersion")
+		If @OSArch = "x64" Then Local $Java7 = RegRead("HKEY_LOCAL_MACHINE64\SOFTWARE\JavaSoft\Java Runtime Environment", "Java7FamilyVersion")
+		If $Java7 = "" And @OSArch = "x64" Then $Java7 = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment", "Java7FamilyVersion")
+		$Java6 = StringRegExp($Java6, "(?i)\d\.\d", 1)
+		$Java7 = StringRegExp($Java7, "(?i)\d\.\d", 1)
+		If $Java6 <> 0 Then	Local $JavaVersions = $JavaVersions & "," & $Java6[0]
+		If $Java7 <> 0 Then	Local $JavaVersions = $JavaVersions & "," & $Java7[0]
+		If $JavaCurrent <> 0 Then Local $JavaCurrentAlreadyExits = StringInStr($JavaVersions, $JavaCurrent[0], 0)
+		If $JavaCurrent <> 0 And $JavaCurrentAlreadyExits = 0 Then Local $JavaVersions = $JavaVersions & "," & $JavaCurrent[0]
+		Local $JavaExit = StringInStr($Java, "!", 0)
+		$Java = StringReplace($Java, "!", "", 0)
+		Local $JavaCheck = StringInStr($JavaVersions, $Java, 0)
+		If $JavaCheck = 0 And $JavaExit = 0 Then MsgBox(64, $gapTitle, "The main application requires Java Runtime Environment version " & $Java & " to run.")
+		If $JavaCheck = 0 And $JavaExit > 0 Then
+			MsgBox(64, $gapTitle, "The main application requires Java Runtime Environment version " & $Java & " to run.")
+			Exit
+		EndIf
+	EndIf
+EndFunc   ;==>JavaFullIni
+;
+;===============================================================================================================
+; Function:		MainAppIni()
+;===============================================================================================================
+Func MainAppIni()
+	Global $MainApp = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "application", ""))
+	Global $MainAppShowState = @SW_SHOW
+	If $MainApp = "" Or $MainApp = "NULL" Then
+		MsgBox(64, $gapTitle, "You MUST define a main application path in the ""GENERAL"" section.")
+		Exit
+	Else
+		Local $MainAppTemp = StringSplit($MainApp, " :: ", 1)
+		If $MainAppTemp[0] > 3 Then
+			MsgBox(64, $gapTitle, "Check the main application path input data.")
+			Exit
+		EndIf
+		If $MainAppTemp[0] = 3 Then
+			If $MainAppTemp[3] = "hide" Then $MainAppShowState = @SW_HIDE
+			If $MainAppTemp[3] = "min" Then $MainAppShowState = @SW_MINIMIZE
+			If $MainAppTemp[3] = "max" Then $MainAppShowState = @SW_MAXIMIZE
+			If @OSArch = "x64" Then
+				Local $MainAppx64 = _PathFull($MainAppTemp[2], @ScriptDir)
+				If Not FileExists($MainAppx64) Then
+					Local $MainAppx86 = _PathFull($MainAppTemp[1], @ScriptDir)
+					If Not FileExists($MainAppx86) Then
+						MsgBox(64, $gapTitle, "The main application (x86) path and (x64) path are invalid.")
+						Exit
+					Else
+						$MainApp = $MainAppx86
+					EndIf
+				Else
+					$MainApp = $MainAppx64
+				EndIf
+			EndIf
+			If @OSArch = "x86" Then
+				Local $MainAppx86 = _PathFull($MainAppTemp[1], @ScriptDir)
+				If Not FileExists($MainAppx86) Then
+					MsgBox(64, $gapTitle, "The main application (x86) path is invalid.")
+					Exit
+				Else
+					$MainApp = $MainAppx86
+				EndIf
+			EndIf
+		EndIf
+		If $MainAppTemp[0] = 2 And @OSArch = "x64" Then
+			Local $MainAppx64 = _PathFull($MainAppTemp[2], @ScriptDir)
+			If Not FileExists($MainAppx64) Then
+				Local $MainAppx86 = _PathFull($MainAppTemp[1], @ScriptDir)
+				If Not FileExists($MainAppx86) Then
+					MsgBox(64, $gapTitle, "The main application (x86) path and (x64) path are invalid.")
+					Exit
+				Else
+					$MainApp = $MainAppx86
+				EndIf
+			Else
+				$MainApp = $MainAppx64
+			EndIf
+		EndIf
+		If $MainAppTemp[0] = 2 And @OSArch = "x86" Then
+			Local $MainAppx86 = _PathFull($MainAppTemp[1], @ScriptDir)
+			If Not FileExists($MainAppx86) Then
+				MsgBox(64, $gapTitle, "The main application (x86) path is invalid.")
+				Exit
+			Else
+				$MainApp = $MainAppx86
+			EndIf
+		EndIf
+		If $MainAppTemp[0] = 1 Then
+			Local $MainAppx86 = _PathFull($MainAppTemp[1], @ScriptDir)
+			If Not FileExists($MainAppx86) Then
+				MsgBox(64, $gapTitle, "The main application (x86) path is invalid.")
+				Exit
+			Else
+				$MainApp = $MainAppx86
+			EndIf
+		EndIf
+	EndIf
+	addvar("MAINPROGRAM", "APPEXE", $MainApp, "V")
+	Local $MainAppPath = StringRegExp($MainApp, "(?i)(.*)\\", 1)
+	addvar("MAINPROGRAM", "EXEPATH", $MainAppPath[0], "V")
+EndFunc   ;==>MainAppIni
+;
+;===============================================================================================================
+; Function:		CmdLineIni()
+;===============================================================================================================
+Func CmdLineIni()
+	Global $MainAppCmdLine = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "commandline", ""))
+	addvar("MAINPROGRAM", "COMMANDLINE", $MainAppCmdLine, "V")
+EndFunc   ;==>CmdLineIni
+;
+;===============================================================================================================
+; Function:		MainAppWorkDirIni()
+;===============================================================================================================
+Func MainAppWorkDirIni()
+	Global $MainAppWorkDir = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "workdir", ""))
+	If $MainAppWorkDir = "" Then
+		Local $MainAppWorkDirTemp = StringRegExp($MainApp, "(?i)(.*)\\", 1)
+		$MainAppWorkDir = $MainAppWorkDirTemp[0]
+	Else
+		$MainAppWorkDir = _PathFull($MainAppWorkDir, @ScriptDir)
+		If Not FileExists($MainAppWorkDir) Then
+			MsgBox(64, $gapTitle, "The main application working directory path is invalid.")
+			Exit
+		EndIf
+	EndIf
+	addvar("MAINPROGRAM", "WORKDIR", $MainAppWorkDir, "V")
+EndFunc   ;==>MainAppWorkDirIni
+;
+;===============================================================================================================
+; Function:		MultipleInstIni()
+;===============================================================================================================
+Func MultipleInstIni()
+	Local $multiple = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!multiple", "0"))
+	Local $gapUniqueCode = "@" & HashData(@ScriptFullPath) & "@" & $gapFileHash & "@"
+	Local $multipleCheck = _SingletonPID($gapUniqueCode, 1)
+	If $multipleCheck > 0 Then
+		$gaPFirstInstance = 0
+		If $multiple = -1 Then Exit
+		If $multiple = 0 Then
+			Local $multipleMessage = MsgBox(33, $gapTitle, Chr(34) & $gapExeName & ".exe" & Chr(34) & " is already running. Are you sure to launch another instance of the main application?")
+			If $multipleMessage = 1 Then
+				If $IsReadOnly = 0 Then
+					IniWrite(@ScriptDir & "\@#$gapnew@#$", "NEWCMDLINE", "NewCmdLine", $CmdLineRaw)
+				EndIf
+				If $IsReadOnly = 1 Then
+					DirCreate($CommonAppData & $gapExeName & "_" & $multipleCheck & "_" & $gapFileHash)
+					IniWrite($CommonAppData & $gapExeName & "_" & $multipleCheck & "_" & $gapFileHash & "\@#$gapnew@#$", "NEWCMDLINE", "NewCmdLine", $CmdLineRaw)
+				EndIf
+				Exit
+			EndIf
+			If $multipleMessage = 2 Then Exit
+		EndIf
+		If $multiple = 1 Then
+			If $IsReadOnly = 0 Then
+				IniWrite(@ScriptDir & "\@#$gapnew@#$", "NEWCMDLINE", "NewCmdLine", $CmdLineRaw)
+			EndIf
+			If $IsReadOnly = 1 Then
+				DirCreate($CommonAppData & $gapExeName & "_" & $multipleCheck & "_" & $gapFileHash)
+				IniWrite($CommonAppData & $gapExeName & "_" & $multipleCheck & "_" & $gapFileHash & "\@#$gapnew@#$", "NEWCMDLINE", "NewCmdLine", $CmdLineRaw)
+			EndIf
+			Exit
+		EndIf
+	EndIf
+EndFunc   ;==>MultipleInstIni
+;
+;===============================================================================================================
+; Function:		IsAdminIni()
+;===============================================================================================================
+Func IsAdminIni()
+	Local $IsAdmin = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!admin", ""))
+	If Not $IsAdmin = "" Then
+		Select
+			Case IsAdmin() = 0 And $IsAdmin = -1
+				Exit
+
+			Case IsAdmin() = 0 And $IsAdmin = 1
+				Local $osVer = RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion")
+				If $osVer >= 6.0 Then
+					Local $UACState = RegRead("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLUA")
+					If $UACState = 0 Or $UACState = "" Then
+						MsgBox(64, $gapTitle, Chr(34) & $gapExeName & ".exe" & Chr(34) & " could not be launched with administrator privileges. The main cause is explained below." & _
+						" Please, check it and try again." & @CRLF & @CRLF & "System administrator disabled UAC (User Account Control) for all users. When this is done UAC dialogs" & _
+						" will not be triggered and standard users will not be able to launch " & Chr(34) & $gapExeName & ".exe" & Chr(34) & " with administrator privileges.")
+						Exit
+					EndIf
+				EndIf
+				If ShellExecute(@ScriptFullPath, $CmdLineRaw, @ScriptDir, "runas") Then
+					Exit
+				Else
+					MsgBox(64, $gapTitle, Chr(34) & $gapExeName & ".exe" & Chr(34) & " could not be launched with administrator privileges. Some possible causes are listed below." & _
+					" Please, check them and try again." & @CRLF & @CRLF & "- User cancelled the ""Run As"" dialog;" & @CRLF & "- User cancelled the UAC (User Account Control)" & _
+					" dialog;" & @CRLF & "- User filled the ""User name"" or ""Password"" fields with wrong data; and" & @CRLF & "- System administrator disabled UAC for all" & _
+					" users. When this is done UAC dialogs will not be triggered and standard users will not be able to launch " & Chr(34) & $gapExeName & ".exe" & Chr(34) & " with" & _
+					" administrator privileges.")
+					Exit
+				EndIf
+
+			Case IsAdmin() = 0 And $IsAdmin = 2
+				MsgBox(64, $gapTitle, "The main application requires administrator privileges to run.")
+				Exit
+		EndSelect
+	EndIf
+EndFunc   ;==>IsAdminIni
+;
+;===============================================================================================================
+; Function:		DotNetIni()
+;===============================================================================================================
+Func DotNetIni()
+	Local $DotNet = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!dotnet", ""))
+	If Not $DotNet = "" Then
+		Local $DotNetVersions = "EMPTY"
+		For $i = 1 To 100
+			Local $DotNetKey = RegEnumKey("HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\NET Framework Setup\NDP", $i)
+			If @error Then ExitLoop
+			Local $DotNetKeyOV = StringRegExp($DotNetKey, "(?i)v\d\.\d", 1)
+			If  $DotNetKeyOV <> 0 Then
+				Local $DotNetKeyON = StringReplace($DotNetKeyOV[0], "v", "")
+				$DotNetVersions = $DotNetVersions & "," & $DotNetKeyON
+			EndIf
+		Next
+		Local $DotNetKey45up = RegRead("HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full", "Release")
+		If $DotNetKey45up = 378389 Then $DotNetKey45up = "4.5"
+		If $DotNetKey45up = 378675 Then $DotNetKey45up = "4.5.1"
+		If $DotNetKey45up = 378758 Then $DotNetKey45up = "4.5.1"
+		If $DotNetKey45up = 379893 Then $DotNetKey45up = "4.5.2"
+		If $DotNetKey45up = 381029 Then $DotNetKey45up = "4.6"
+		If $DotNetKey45up <> 0 Then $DotNetVersions = $DotNetVersions & "," & $DotNetKey45up
+		Local $DotNetExit = StringInStr($DotNet, "!", 0)
+		$DotNet = StringReplace($DotNet, "!", "", 0)
+		Local $DotNetCheck = StringInStr($DotNetVersions, $DotNet, 0)
+		If $DotNetCheck = 0 And $DotNetExit = 0 Then MsgBox(64, $gapTitle, "The main application requires .NET Framework version " & $DotNet & " to run.")
+		If $DotNetCheck = 0 And $DotNetExit > 0 Then
+			MsgBox(64, $gapTitle, "The main application requires .NET Framework version " & $DotNet & " to run.")
+			Exit
+		EndIf
+	EndIf
+EndFunc   ;==>DotNetIni
+;
+;===============================================================================================================
+; Function:		OnlineIni()
+;===============================================================================================================
+Func OnlineIni()
+	Local $online = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!online", ""))
+	If Not $online = "" Then
+		Local $onlineAddress1 = Ping("127.0.0.1", 4000)
+		Local $onlineAddress2 = Ping("www.google.com", 4000)
+		Local $onlineAddress3 = Ping("www.microsoft.com", 4000)
+		Local $onlineNtry = 5
+		Local $onlineStatus1 = 0
+		Local $onlineStatus2 = 0
+		Local $onlineStatus3 = 0
+		Local $onlineCheck = 0
+		For $onlinei = 1 To $onlineNtry
+			If $onlineAddress1 Then $onlineStatus1 = 1
+			If $onlineAddress2 Then	$onlineStatus2 = 1
+			If $onlineAddress3 Then	$onlineStatus3 = 1
+			Select
+				Case $onlineStatus1 = 1 And $onlineStatus2 = 1
+					$onlineCheck = 1
+					ExitLoop
+
+				Case $onlineStatus1 = 1 And $onlineStatus3 = 1
+					$onlineCheck = 1
+					ExitLoop
+
+			EndSelect
+		Next
+		Select
+			Case $onlineCheck = 0 And $online = 1
+				Local $onlineMessage = MsgBox(33, $gapTitle, "The main application requires an active Internet connection to run. Continue anyway?")
+				If $onlineMessage = 2 Then Exit
+
+			Case $onlineCheck = 0 And $online = 2
+				Local $onlineMessage = MsgBox(64, $gapTitle, "The main application requires an active Internet connection to run.")
+				Exit
+
+			Case $onlineCheck = 0 And $online = -1
+				Exit
+
+			Case $onlineCheck = 1 And $online = -2
+				Local $onlineMessage = MsgBox(33, $gapTitle, "The main application requires an inactive Internet connection to run. Continue anyway?")
+				If $onlineMessage = 2 Then Exit
+
+			Case $onlineCheck = 1 And $online = -3
+				Local $onlineMessage = MsgBox(64, $gapTitle, "The main application requires an inactive Internet connection to run.")
+				Exit
+
+			Case $onlineCheck = 1 And $online = -4
+				Exit
+
+		EndSelect
+	EndIf
+EndFunc   ;==>OnlineIni
+;
+;===============================================================================================================
+; Function:		OSIni()
+;===============================================================================================================
+Func OSIni()
+	Local $os = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!os", ""))
+	If Not $os = "" Then
+		Local $osVer = RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion")
+		Select
+			Case $os = "XP"
+				If Not $osVer >= 5.1 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows XP or newer.")
+					Exit
+				EndIf
+
+			Case $os = "Vista"
+				If Not $osVer >= 6.0 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows Vista or newer.")
+					Exit
+				EndIf
+
+			Case $os = "7"
+				If Not $osVer >= 6.1 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows 7 or newer.")
+					Exit
+				EndIf
+
+			Case $os = "8"
+				If Not $osVer >= 6.2 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows 8 or newer.")
+					Exit
+				EndIf
+
+			Case $os = "8.1"
+				If Not $osVer >= 6.3 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows 8.1 or newer.")
+					Exit
+				EndIf
+
+			Case $os = "<XP"
+				If Not $osVer <= 5.1 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows XP or older.")
+					Exit
+				EndIf
+
+			Case $os = "<Vista"
+				If Not $osVer <= 6.0 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows Vista or older.")
+					Exit
+				EndIf
+
+			Case $os = "<7"
+				If Not $osVer <= 6.1 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows 7 or older.")
+					Exit
+				EndIf
+
+			Case $os = "<8"
+				If Not $osVer <= 6.2 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows 8 or older.")
+					Exit
+				EndIf
+
+			Case $os = "<8.1"
+				If Not $osVer <= 6.3 Then
+					MsgBox(64, $gapTitle, "The main application requires a host Operating System equal Windows 8.1 or older.")
+					Exit
+				EndIf
+
+		EndSelect
+	EndIf
+EndFunc   ;==>OSIni
+;
+;===============================================================================================================
+; Function:		WaitIni()
+;===============================================================================================================
+Func WaitIni()
+	Global $waitprocess = FindReplaceX("MAINPROGRAM", IniRead($gapIniFilePath, "GENERAL", "!waitprocess", ""))
+EndFunc   ;==>WaitIni
+;
+;===============================================================================================================
+; Function:		RunMainAppProc()
+;===============================================================================================================
+Func RunMainAppProc()
+	Local $MainAppRun = Run($MainApp & " " & $MainAppCmdLine & " " & $CmdLineRaw, $MainAppWorkDir, $MainAppShowState)
+	If $gapWait = 1 Then
+		Local $gapPID = @AutoItPID
+		Local $gapChildren = _WinAPI_EnumChildProcess($gaPPID)
+		While $gapChildren <> 0
+			Sleep(250)
+			If FileExists(@ScriptDir & "\@#$gapnew@#$") Then
+				$CmdLineRaw = IniRead(@ScriptDir & "\@#$gapnew@#$", "NEWCMDLINE", "NewCmdLine", "")
+				FileDelete(@ScriptDir & "\@#$gapnew@#$")
+				$MainAppRun = Run($MainApp & " " & $MainAppCmdLine & " " & $CmdLineRaw, $MainAppWorkDir, $MainAppShowState)
+			EndIf
+			If FileExists($CommonAppData & $gapExeName & "_" & @AutoItPID & "_" & $gapFileHash & "\@#$gapnew@#$") Then
+				$CmdLineRaw = IniRead($CommonAppData & $gapExeName & "_" & @AutoItPID & "_" & $gapFileHash & "\@#$gapnew@#$", "NEWCMDLINE", "NewCmdLine", "")
+				DirRemove($CommonAppData & $gapExeName & "_" & @AutoItPID & "_" & $gapFileHash, 1)
+				$MainAppRun = Run($MainApp & " " & $MainAppCmdLine & " " & $CmdLineRaw, $MainAppWorkDir, $MainAppShowState)
+			EndIf
+			$gapChildren = _WinAPI_EnumChildProcess($gaPPID)
+		WEnd
+		If $waitprocess <> "" Then WinWaitClose($waitprocess)
+	EndIf
+EndFunc   ;==>RunMainAppProc
+;
+;===============================================================================================================
+; Function:		BeforeSecIni()
+;===============================================================================================================
+Func BeforeSecIni()
+	If $RunBeforeSec = 1 Then
+		Global $BeforeSecArray = IniReadSection($gapIniFilePath, "BEFORE")
+		If $BeforeSecArray = 1 Then
+			$BeforeSecArray = StringSplit("DONE!", ",", 1)
+			_ArrayColInsert($BeforeSecArray, 1)
+			_ArrayColInsert($BeforeSecArray, 2)
+			$BeforeSecArray[1][1] = "DONE!"
+		Else
+			_ArrayColInsert($BeforeSecArray, 2)
+		EndIf
+		If $DebugLog = 1 Then
+			DebugLogWrite("MAINPROGRAM", "[Before Section Tasks List - Raw]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $BeforeSecArray, 1, 1)
+		EndIf
+		For $bai = 1 To $BeforeSecArray[0][0]
+			$BeforeSecArray[$bai][2]= "USER"
+		Next
+		For $bai = 1 To $BeforeSecArray[0][0]
+			If $BeforeSecArray[$bai][0] <> "DONE!" Then
+				If $BeforeSecArray[$bai][1] = "" Then
+					$BeforeSecArray[$bai][1] = "BEFORE"
+				Else
+					$BeforeSecArray[$bai][1] = "BEFORE :: " & $BeforeSecArray[$bai][1]
+				EndIf
+			EndIf
+		Next
+		For $bai = 1 To $BeforeSecArray[0][0]
+			Local $BSAx86Check = StringInStr($BeforeSecArray[$bai][0], "x86", 0, 1)
+			Local $BSAx64Check = StringInStr($BeforeSecArray[$bai][0], "x64", 0, 1)
+			Select
+				Case @OSArch = "x86" And $BSAx86Check > 0 And $BSAx64Check = 0
+					$BeforeSecArray[$bai][0] = Stringreplace($BeforeSecArray[$bai][0], "x86", "", 0, 0)
+
+				Case @OSArch = "x86" And $BSAx86Check = 0 And $BSAx64Check > 0
+					$BeforeSecArray[$bai][0] = "DONE!"
+					$BeforeSecArray[$bai][1] = "DONE!"
+
+				Case @OSArch = "x86" And $BSAx86Check > 0 And $BSAx64Check > 0
+					$BeforeSecArray[$bai][0] = "DONE!"
+					$BeforeSecArray[$bai][1] = "DONE!"
+
+				Case @OSArch = "x64" And $BSAx86Check = 0 And $BSAx64Check > 0
+					$BeforeSecArray[$bai][0] = Stringreplace($BeforeSecArray[$bai][0], "x64", "", 0, 0)
+
+				Case @OSArch = "x64" And $BSAx86Check > 0 And $BSAx64Check = 0
+					$BeforeSecArray[$bai][0] = "DONE!"
+					$BeforeSecArray[$bai][1] = "DONE!"
+
+				Case @OSArch = "x64" And $BSAx86Check > 0 And $BSAx64Check > 0
+					$BeforeSecArray[$bai][0] = "DONE!"
+					$BeforeSecArray[$bai][1] = "DONE!"
+
+			EndSelect
+		Next
+		For $bai = 1 To $BeforeSecArray[0][0]
+			Local $BSpecialChrArray = StringSplit("(,p,),p,->,LTR,<-,RTL,-,minus,+,plus,stringreplace,gstringreplace,run,grun,iniread,giniread,iniwrite,giniwrite", ",", 1)
+			For $BSCai = 1 To $BSpecialChrArray[0] Step 2
+				$BeforeSecArray[$bai][0] = StringReplace($BeforeSecArray[$bai][0], $BSpecialChrArray[$BSCai], $BSpecialChrArray[$BSCai + 1], 0, 1)
+			Next
+		Next
+		If $DebugLog = 1 Then
+			DebugLogWrite("MAINPROGRAM", "[Before Section Tasks List - Initialized]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $BeforeSecArray, 1, 1)
+		EndIf
+	EndIf
+EndFunc   ;==>BeforeSecIni
+;
+;===============================================================================================================
+; Function:		AfterSecIni()
+;===============================================================================================================
+Func AfterSecIni()
+	If $RunAfterSec = 1 Then
+		Global $AfterSecArray = IniReadSection($gapIniFilePath, "AFTER")
+		If $AfterSecArray = 1 Then
+			$AfterSecArray = StringSplit("DONE!", ",", 1)
+			_ArrayColInsert($AfterSecArray, 1)
+			_ArrayColInsert($AfterSecArray, 2)
+			$AfterSecArray[1][1] = "DONE!"
+		Else
+			_ArrayColInsert($AfterSecArray, 2)
+		EndIf
+		If $DebugLog = 1 Then
+			DebugLogWrite("MAINPROGRAM", "[After Section Tasks List - Raw]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $AfterSecArray, 1, 1)
+		EndIf
+		For $aai = 1 To $AfterSecArray[0][0]
+			$AfterSecArray[$aai][2] = "USER"
+		Next
+		For $aai = 1 To $AfterSecArray[0][0]
+			If $AfterSecArray[$aai][0] <> "DONE!" Then
+				If $AfterSecArray[$aai][1] = "" Then
+					$AfterSecArray[$aai][1] = "AFTER"
+				Else
+					$AfterSecArray[$aai][1] = "AFTER :: " & $AfterSecArray[$aai][1]
+				EndIf
+			EndIf
+		Next
+		For $aai = 1 To $AfterSecArray[0][0]
+			Local $ASAx86Check = StringInStr($AfterSecArray[$aai][0], "x86", 0, 1)
+			Local $ASAx64Check = StringInStr($AfterSecArray[$aai][0], "x64", 0, 1)
+			Select
+				Case @OSArch = "x86" And $ASAx86Check > 0 And $ASAx64Check = 0
+					$AfterSecArray[$aai][0] = Stringreplace($AfterSecArray[$aai][0], "x86", "", 0, 0)
+
+				Case @OSArch = "x86" And $ASAx86Check = 0 And $ASAx64Check > 0
+					$AfterSecArray[$aai][0] = "DONE!"
+					$AfterSecArray[$aai][1] = "DONE!"
+
+				Case @OSArch = "x86" And $ASAx86Check > 0 And $ASAx64Check > 0
+					$AfterSecArray[$aai][0] = "DONE!"
+					$AfterSecArray[$aai][1] = "DONE!"
+
+				Case @OSArch = "x64" And $ASAx86Check = 0 And $ASAx64Check > 0
+					$AfterSecArray[$aai][0] = Stringreplace($AfterSecArray[$aai][0], "x64", "", 0, 0)
+
+				Case @OSArch = "x64" And $ASAx86Check > 0 And $ASAx64Check = 0
+					$AfterSecArray[$aai][0] = "DONE!"
+					$AfterSecArray[$aai][1] = "DONE!"
+
+				Case @OSArch = "x64" And $ASAx86Check > 0 And $ASAx64Check > 0
+					$AfterSecArray[$aai][0] = "DONE!"
+					$AfterSecArray[$aai][1] = "DONE!"
+
+			EndSelect
+		Next
+		For $aai = 1 To $AfterSecArray[0][0]
+			Local $ASpecialChrArray = StringSplit("(,p,),p,->,LTR,<-,RTL,-,minus,+,plus,stringreplace,gstringreplace,run,grun,iniread,giniread,iniwrite,giniwrite", ",", 1)
+			For $ASCai = 1 To $ASpecialChrArray[0] Step 2
+				$AfterSecArray[$aai][0] = StringReplace($AfterSecArray[$aai][0], $ASpecialChrArray[$ASCai], $ASpecialChrArray[$ASCai + 1], 0, 1)
+			Next
+		Next
+		If $DebugLog = 1 Then
+			DebugLogWrite("MAINPROGRAM", "[After Section Tasks List - Initialized]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $AfterSecArray, 1, 1)
+		EndIf
+	EndIf
+EndFunc   ;==>AfterSecIni
+;
+;===============================================================================================================
+; Function:		BeforeSecProc()
+;===============================================================================================================
+Func BeforeSecProc()
+	If $RunBeforeSec = 1 Then
+		For $bai = 1 To $BeforeSecArray[0][0]
+			Local $BRunFirst = "uservar,envvar,giniread,gstringreplace"
+			Local $BRFArray = StringSplit($BRunFirst, ",", 1)
+			For $brfai = 1 To $BRFArray[0]
+				If $BeforeSecArray[$bai][0] = $BRFArray[$brfai] Then
+					Local $ParamBArray = StringSplit($BeforeSecArray[$bai][1], " :: ", 1)
+					Local $CallArgBArray[$ParamBArray[0] + 1]
+					$CallArgBArray[0] = "CallArgArray"
+					For $pbai = 1 To $ParamBArray[0]
+						$CallArgBArray[$pbai] = $ParamBArray[$pbai]
+					Next
+					Call($BeforeSecArray[$bai][0], $CallArgBArray)
+					$BeforeSecArray[$bai][0] = "DONE!"
+					$BeforeSecArray[$bai][1] = "DONE!"
+				EndIf
+			Next
+		Next
+		For $bai = 1 To $BeforeSecArray[0][0]
+			If $BeforeSecArray[$bai][0] <> "DONE!" Then
+				Local $ParamBArray = StringSplit($BeforeSecArray[$bai][1], " :: ", 1)
+				Local $CallArgBArray[$ParamBArray[0] + 1]
+				$CallArgBArray[0] = "CallArgArray"
+				For $pbai = 1 To $ParamBArray[0]
+					$CallArgBArray[$pbai] = $ParamBArray[$pbai]
+				Next
+				Call($BeforeSecArray[$bai][0], $CallArgBArray)
+				$BeforeSecArray[$bai][0] = "DONE!"
+				$BeforeSecArray[$bai][1] = "DONE!"
+			EndIf
+		Next
+		If $DebugLog = 1 Then
+			DebugLogWrite("MAINPROGRAM", "[Before Section Tasks List - Processed]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $BeforeSecArray, 1, 1)
+			DebugLogWrite("MAINPROGRAM", "[Variables List]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $VarArray, 1, 1)
+			DebugLogWrite("MAINPROGRAM", "[After Section Tasks List - Reinitialized]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $AfterSecArray, 1, 1)
+		EndIf
+	EndIf
+EndFunc   ;==>BeforeSecProc
+;
+;===============================================================================================================
+; Function:		AfterSecProc()
+;===============================================================================================================
+Func AfterSecProc()
+	If $RunAfterSec = 1 Then
+		For $aai = 1 To $AfterSecArray[0][0]
+			Local $ARunFirst = "nowait,quit,uservar,envvar,giniread,gstringreplace"
+			Local $ARFArray = StringSplit($ARunFirst, ",", 1)
+			For $arfai = 1 To $ARFArray[0]
+				If $AfterSecArray[$aai][0] = $ARFArray[$arfai] Then
+					Local $ParamAArray = StringSplit($AfterSecArray[$aai][1], " :: ", 1)
+					Local $CallArgAArray[$ParamAArray[0] + 1]
+					$CallArgAArray[0] = "CallArgArray"
+					For $paai = 1 To $ParamAArray[0]
+						$CallArgAArray[$paai] = $ParamAArray[$paai]
+					Next
+					Call($AfterSecArray[$aai][0], $CallArgAArray)
+					$AfterSecArray[$aai][0] = "DONE!"
+					$AfterSecArray[$aai][1] = "DONE!"
+				EndIf
+			Next
+		Next
+		For $aai = 1 To $AfterSecArray[0][0]
+			If $AfterSecArray[$aai][0] <> "DONE!" Then
+				Local $ParamAArray = StringSplit($AfterSecArray[$aai][1], " :: ", 1)
+				Local $CallArgAArray[$ParamAArray[0] + 1]
+				$CallArgAArray[0] = "CallArgArray"
+				For $paai = 1 To $ParamAArray[0]
+					$CallArgAArray[$paai] = $ParamAArray[$paai]
+				Next
+				Call($AfterSecArray[$aai][0], $CallArgAArray)
+				$AfterSecArray[$aai][0] = "DONE!"
+				$AfterSecArray[$aai][1] = "DONE!"
+			EndIf
+		Next
+		If $DebugLog = 1 Then
+			DebugLogWrite("MAINPROGRAM", "[After Section Tasks List - Processed]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $AfterSecArray, 1, 1)
+			DebugLogWrite("MAINPROGRAM", "[Variables List]", 0, 0)
+			DebugLogWrite("MAINPROGRAM", $VarArray, 1, 0)
+		EndIf
+	EndIf
+EndFunc   ;==>AfterSecProc
+;
+;===============================================================================================================
+; Function:		CleanMUICache()
+;===============================================================================================================
+Func CleanMUICache($CMUIFFilePath = "NULL")
+	If $CMUIFFilePath = "NULL" Then
+		$CMUIFFilePath = @ScriptFullPath
+	Else
+		$CMUIFFilePath = _PathFull(FindReplaceX("MAINPROGRAM", $CMUIFFilePath), @ScriptDir)
+	EndIf
+	Local $CMUIFosVer = RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion")
+	If $CMUIFosVer >= 6.0 Then
+		Local $CMUIFEntry1 = RegRead("HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache", $CMUIFFilePath)
+		If @error = 0 Then RegDelete("HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache", $CMUIFFilePath)
+		If IsDeclared("MainApp") And $CMUIFFilePath = @ScriptFullPath Then
+			Local $CMUIFEntry2 = RegRead("HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache", $MainApp)
+			If @error = 0 Then RegDelete("HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache", $MainApp)
+		EndIf
+	Else
+		Local $CMUIFEntry1 = RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\ShellNoRoam\MUICache", $CMUIFFilePath)
+		If @error = 0 Then RegDelete("HKEY_CURRENT_USER\Software\Microsoft\Windows\ShellNoRoam\MUICache", $CMUIFFilePath)
+		If IsDeclared("MainApp") And $CMUIFFilePath = @ScriptFullPath Then
+			Local $CMUIFEntry2 = RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\ShellNoRoam\MUICache", $MainApp)
+			If @error = 0 Then RegDelete("HKEY_CURRENT_USER\Software\Microsoft\Windows\ShellNoRoam\MUICache", $MainApp)
+		EndIf
+	EndIf
+EndFunc   ;==>CleanMUICache
+;
+;===============================================================================================================
+; Function:		CleanAppPaths()
+;===============================================================================================================
+Func CleanAppPaths($CAPFFilePath = "NULL")
+	If $CAPFFilePath = "NULL" Then
+		$CAPFFilePath = @ScriptFullPath
+	Else
+		$CAPFFilePath = _PathFull(FindReplaceX("MAINPROGRAM", $CAPFFilePath), @ScriptDir)
+	EndIf
+	Local $CAPFgapExeName = StringRegExp($CAPFFilePath, "(?i).*\\(.*\..*)", 1)
+	$CAPFgapExeName = $CAPFgapExeName[0]
+	Local $CAPFEntry1 = RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFgapExeName, "")
+	If @error = 0 Then
+		Local $CAPFEntry1Check = StringInStr($CAPFEntry1, $CAPFFilePath, 0, 1)
+		If $CAPFEntry1Check > 0 Then RegDelete("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFgapExeName)
+	EndIf
+	Local $CAPFEntry2 = RegRead("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFgapExeName, "")
+	If @error = 0 Then
+		Local $CAPFEntry2Check = StringInStr($CAPFEntry2, $CAPFFilePath, 0, 1)
+		If $CAPFEntry2Check > 0 Then RegDelete("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFgapExeName)
+	EndIf
+	If IsDeclared("MainApp") And $CAPFFilePath = @ScriptFullPath Then
+		Local $CAPFMainAppExeName = StringRegExp($MainApp, "(?i).*\\(.*\..*)", 1)
+		$CAPFMainAppExeName = $CAPFMainAppExeName[0]
+		Local $CAPFEntry3 = RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFMainAppExeName, "")
+		If @error = 0 Then
+			Local $CAPFEntry3Check = StringInStr($CAPFEntry3, $MainApp, 0, 1)
+			If $CAPFEntry3Check > 0 Then RegDelete("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFMainAppExeName)
+		EndIf
+		Local $CAPFEntry4 = RegRead("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFMainAppExeName, "")
+		If @error = 0 Then
+			Local $CAPFEntry4Check = StringInStr($CAPFEntry4, $MainApp, 0, 1)
+			If $CAPFEntry4Check > 0 Then RegDelete("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\App Paths\" & $CAPFMainAppExeName)
+		EndIf
+	EndIf
+EndFunc   ;==>CleanAppPaths
+;
+;===============================================================================================================
+; Function:		clean() - clean
+;===============================================================================================================
+Func clean($cleanFCaller, $cleanFFilePath)
+	If $cleanFCaller = "BEFORE" Or $cleanFCaller = "AFTER" Then
+		CleanMUICache($cleanFFilePath)
+		CleanAppPaths($cleanFFilePath)
+	Else
+		Local $cleanFError = MsgBox(64, $gapTitle, "The ""clean"" function can't be called from the """ & $cleanFCaller & """ section.")
+	EndIf
+EndFunc   ;==>clean
+;
+;===============================================================================================================
+; Function:		dir() - dir
+;===============================================================================================================
+Func dir($dirFCaller, $dirFSource, $dirFTarget = "NULL")
+	If $dirFCaller = "BEFORE" Then
+		$dirFSource = _PathFull(FindReplaceX("MAINPROGRAM", $dirFSource), @ScriptDir)
+		LTRdir($dirFCaller, $dirFSource, $dirFSource & "_backup", "move, overwrite")
+		LTRdir($dirFCaller, $dirFTarget, $dirFSource, "copy, overwrite")
+		Local $dirFArray[2]
+		_ArrayColInsert($dirFArray, 1)
+		_ArrayColInsert($dirFArray, 2)
+		$dirFArray[0][0] = "LTRdir"
+		$dirFArray[0][1] = "BEFORE :: " & $dirFSource & " :: " & $dirFTarget & " :: move, overwrite"
+		$dirFArray[0][2] = "PROG"
+		$dirFArray[1][0] = "RTLdir"
+		$dirFArray[1][1] = "BEFORE :: " & $dirFSource & " :: " & $dirFSource & "_backup" & " :: move, overwrite"
+		$dirFArray[1][2] = "PROG"
+		For $dirFArrayi = 0 To UBound($dirFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($dirFArray, $dirFArrayi, $dirFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 2
+	Else
+		Local $dirFError = MsgBox(64, $gapTitle, "The ""dir"" function can't be called from the """ & $dirFCaller & """ section.")
+	EndIf
+EndFunc   ;==>dir
+;
+;===============================================================================================================
+; Function:		file() - file
+;===============================================================================================================
+Func file($fileFCaller, $fileFSource, $fileFTarget = "NULL")
+	If $fileFCaller = "BEFORE" Then
+		LTRfile($fileFCaller, $fileFSource, $fileFSource & "_backup", "move, overwrite")
+		LTRfile($fileFCaller, $fileFTarget, $fileFSource, "copy, overwrite")
+		Local $fileFArray[2]
+		_ArrayColInsert($fileFArray, 1)
+		_ArrayColInsert($fileFArray, 2)
+		$fileFArray[0][0] = "LTRfile"
+		$fileFArray[0][1] = "BEFORE :: " & $fileFSource & " :: " & $fileFTarget & " :: move, overwrite"
+		$fileFArray[0][2] = "PROG"
+		$fileFArray[1][0] = "RTLfile"
+		$fileFArray[1][1] = "BEFORE :: " & $fileFSource & " :: " & $fileFSource & "_backup" & " :: move, overwrite"
+		$fileFArray[1][2] = "PROG"
+		For $fileFArrayi = 0 To UBound($fileFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($fileFArray, $fileFArrayi, $fileFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 2
+	Else
+		Local $fileFError = MsgBox(64, $gapTitle, "The ""file"" function can't be called from the """ & $fileFCaller & """ section.")
+	EndIf
+EndFunc   ;==>file
+;
+;===============================================================================================================
+; Function:		regkey() - regkey
+;===============================================================================================================
+Func regkey($regkFCaller, $regkFSource, $regkFTarget = "NULL", $regkFFlag = "NULL")
+	If $regkFCaller = "BEFORE" Then
+		$regkFSource = FindReplaceX("MAINPROGRAM", $regkFSource)
+		Local $regkFCheck1 = StringRight($regkFSource, 1)
+		If $regkFCheck1 = "\" Then $regkFSource = StringReplace($regkFSource, "\", "", -1, 1)
+		LTRregkey($regkFCaller, $regkFSource, $regkFSource & "_backup", "copy", $regkFFlag)
+		minusregkey($regkFCaller, $regkFSource, "NULL", $regkFFlag)
+		regimport($regkFCaller, $regkFTarget, $regkFFlag)
+		Local $regkFArray[4]
+		_ArrayColInsert($regkFArray, 1)
+		_ArrayColInsert($regkFArray, 2)
+		$regkFArray[0][0] = "regexport"
+		$regkFArray[0][1] = "BEFORE :: " & $regkFSource & "\ :: " & $regkFTarget & " :: " & $regkFFlag
+		$regkFArray[0][2] = "PROG"
+		$regkFArray[1][0] = "minusregkey"
+		$regkFArray[1][1] = "BEFORE :: " & $regkFSource & " :: NULL :: " & $regkFFlag
+		$regkFArray[1][2] = "PROG"
+		$regkFArray[2][0] = "RTLregkey"
+		$regkFArray[2][1] = "BEFORE :: " & $regkFSource & " :: " & $regkFSource & "_backup" & " :: move :: " & $regkFFlag
+		$regkFArray[2][2] = "PROG"
+		$regkFArray[3][0] = "minusregkey"
+		$regkFArray[3][1] = "BEFORE :: " & $regkFSource & " :: ifempty :: " & $regkFFlag
+		$regkFArray[3][2] = "PROG"
+		For $regkFArrayi = 0 To UBound($regkFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($regkFArray, $regkFArrayi, $regkFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 4
+	Else
+		Local $regkFError = MsgBox(64, $gapTitle, "The ""regkey"" function can't be called from the """ & $regkFCaller & """ section.")
+	EndIf
+EndFunc   ;==>regkey
+;
+;===============================================================================================================
+; Function:		regvalue() - regvalue
+;===============================================================================================================
+Func regvalue($regvFCaller, $regvFSource, $regvFTarget = "NULL", $regvFFlag = "NULL")
+	If $regvFCaller = "BEFORE" Then
+		$regvFSource = FindReplaceX("MAINPROGRAM", $regvFSource)
+		Local $regvFCheck1 = StringRight($regvFSource, 1)
+		If $regvFCheck1 = "\" Then $regvFSource = StringReplace($regvFSource, "\", "", -1, 1)
+		Local $regvFCheck2 = StringSplit($regvFSource, "\", 1)
+		Local $regvFSourceK = StringReplace($regvFSource, "\" & $regvFCheck2[$regvFCheck2[0]], "", -1, 1)
+		Local $regvFSourceV = $regvFCheck2[$regvFCheck2[0]]
+		LTRregvalue($regvFCaller, $regvFSource, $regvFSource & "_backup", "copy", $regvFFlag)
+		regimport($regvFCaller, $regvFTarget, $regvFFlag)
+		Local $regvFArray[4]
+		_ArrayColInsert($regvFArray, 1)
+		_ArrayColInsert($regvFArray, 2)
+		$regvFArray[0][0] = "regexport"
+		$regvFArray[0][1] = "BEFORE :: " & $regvFSource & " :: " & $regvFTarget & " :: " & $regvFFlag
+		$regvFArray[0][2] = "PROG"
+		$regvFArray[1][0] = "minusregvalue"
+		$regvFArray[1][1] = "BEFORE :: " & $regvFSourceK & " :: " & $regvFSourceV & " :: " & $regvFFlag
+		$regvFArray[1][2] = "PROG"
+		$regvFArray[2][0] = "RTLregvalue"
+		$regvFArray[2][1] = "BEFORE :: " & $regvFSource & " :: " & $regvFSource & "_backup" & " :: move :: " & $regvFFlag
+		$regvFArray[2][2] = "PROG"
+		$regvFArray[3][0] = "minusregkey"
+		$regvFArray[3][1] = "BEFORE :: " & $regvFSourceK & " :: ifempty :: " & $regvFFlag
+		$regvFArray[3][2] = "PROG"
+		For $regvFArrayi = 0 To UBound($regvFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($regvFArray, $regvFArrayi, $regvFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 4
+	Else
+		Local $regvFError = MsgBox(64, $gapTitle, "The ""regvalue"" function can't be called from the """ & $regvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>regvalue
+;
+;===============================================================================================================
+; Function:		pdirp() - (dir)
+;===============================================================================================================
+Func pdirp($pdirpFCaller, $pdirpFSource)
+	If $pdirpFCaller = "BEFORE" Then
+		$pdirpFSource = _PathFull(FindReplaceX("MAINPROGRAM", $pdirpFSource), @ScriptDir)
+		LTRdir($pdirpFCaller, $pdirpFSource, $pdirpFSource & "_backup", "move, overwrite")
+		Local $pdirpFArray[1]
+		_ArrayColInsert($pdirpFArray, 1)
+		_ArrayColInsert($pdirpFArray, 2)
+		$pdirpFArray[0][0] = "RTLdir"
+		$pdirpFArray[0][1] = "BEFORE :: " & $pdirpFSource & " :: " & $pdirpFSource & "_backup" & " :: move, overwrite"
+		$pdirpFArray[0][2] = "PROG"
+		For $pdirpFArrayi = 0 To UBound($pdirpFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($pdirpFArray, $pdirpFArrayi, $pdirpFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 1
+	Else
+		Local $pdirpFError = MsgBox(64, $gapTitle, "The ""(dir)"" function can't be called from the """ & $pdirpFCaller & """ section.")
+	EndIf
+EndFunc   ;==>pdirp
+;
+;===============================================================================================================
+; Function:		pfilep() - (file)
+;===============================================================================================================
+Func pfilep($pfilepFCaller, $pfilepFSource)
+	If $pfilepFCaller = "BEFORE" Then
+		LTRfile($pfilepFCaller, $pfilepFSource, $pfilepFSource & "_backup", "move, overwrite")
+		Local $pfilepFArray[1]
+		_ArrayColInsert($pfilepFArray, 1)
+		_ArrayColInsert($pfilepFArray, 2)
+		$pfilepFArray[0][0] = "RTLfile"
+		$pfilepFArray[0][1] = "BEFORE :: " & $pfilepFSource & " :: " & $pfilepFSource & "_backup" & " :: move, overwrite"
+		$pfilepFArray[0][2] = "PROG"
+		For $pfilepFArrayi = 0 To UBound($pfilepFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($pfilepFArray, $pfilepFArrayi, $pfilepFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 1
+	Else
+		Local $pfilepFError = MsgBox(64, $gapTitle, "The ""(file)"" function can't be called from the """ & $pfilepFCaller & """ section.")
+	EndIf
+EndFunc   ;==>pfilep
+;
+;===============================================================================================================
+; Function:		pregkeyp() - (regkey)
+;===============================================================================================================
+Func pregkeyp($pregkpFCaller, $pregkpFSource, $pregkpFFlag = "NULL")
+	If $pregkpFCaller = "BEFORE" Then
+		$pregkpFSource = FindReplaceX("MAINPROGRAM", $pregkpFSource)
+		Local $pregkpFCheck1 = StringRight($pregkpFSource, 1)
+		If $pregkpFCheck1 = "\" Then $pregkpFSource = StringReplace($pregkpFSource, "\", "", -1, 1)
+		LTRregkey($pregkpFCaller, $pregkpFSource, $pregkpFSource & "_backup", "copy", $pregkpFFlag)
+		Local $pregkpFArray[3]
+		_ArrayColInsert($pregkpFArray, 1)
+		_ArrayColInsert($pregkpFArray, 2)
+		$pregkpFArray[0][0] = "minusregkey"
+		$pregkpFArray[0][1] = "BEFORE :: " & $pregkpFSource & " :: NULL :: " & $pregkpFFlag
+		$pregkpFArray[0][2] = "PROG"
+		$pregkpFArray[1][0] = "RTLregkey"
+		$pregkpFArray[1][1] = "BEFORE :: " & $pregkpFSource & " :: " & $pregkpFSource & "_backup" & " :: move :: " & $pregkpFFlag
+		$pregkpFArray[1][2] = "PROG"
+		$pregkpFArray[2][0] = "minusregkey"
+		$pregkpFArray[2][1] = "BEFORE :: " & $pregkpFSource & " :: ifempty :: " & $pregkpFFlag
+		$pregkpFArray[2][2] = "PROG"
+		For $pregkpFArrayi = 0 To UBound($pregkpFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($pregkpFArray, $pregkpFArrayi, $pregkpFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 3
+	Else
+		Local $pregkpFError = MsgBox(64, $gapTitle, "The ""(regkey)"" function can't be called from the """ & $pregkpFCaller & """ section.")
+	EndIf
+EndFunc   ;==>pregkeyp
+;
+;===============================================================================================================
+; Function:		pregvaluep() - (regvalue)
+;===============================================================================================================
+Func pregvaluep($pregvpFCaller, $pregvpFSource, $pregvpFFlag = "NULL")
+	If $pregvpFCaller = "BEFORE" Then
+		$pregvpFSource = FindReplaceX("MAINPROGRAM", $pregvpFSource)
+		Local $pregvpFCheck1 = StringRight($pregvpFSource, 1)
+		If $pregvpFCheck1 = "\" Then $pregvpFSource = StringReplace($pregvpFSource, "\", "", -1, 1)
+		Local $pregvpFCheck2 = StringSplit($pregvpFSource, "\", 1)
+		Local $pregvpFSourceK = StringReplace($pregvpFSource, "\" & $pregvpFCheck2[$pregvpFCheck2[0]], "", -1, 1)
+		Local $pregvpFSourceV = $pregvpFCheck2[$pregvpFCheck2[0]]
+		LTRregvalue($pregvpFCaller, $pregvpFSource, $pregvpFSource & "_backup", "copy", $pregvpFFlag)
+		Local $pregvpFArray[3]
+		_ArrayColInsert($pregvpFArray, 1)
+		_ArrayColInsert($pregvpFArray, 2)
+		$pregvpFArray[0][0] = "minusregvalue"
+		$pregvpFArray[0][1] = "BEFORE :: " & $pregvpFSourceK & " :: " & $pregvpFSourceV & " :: " & $pregvpFFlag
+		$pregvpFArray[0][2] = "PROG"
+		$pregvpFArray[1][0] = "RTLregvalue"
+		$pregvpFArray[1][1] = "BEFORE :: " & $pregvpFSource & " :: " & $pregvpFSource & "_backup" & " :: move :: " & $pregvpFFlag
+		$pregvpFArray[1][2] = "PROG"
+		$pregvpFArray[2][0] = "minusregkey"
+		$pregvpFArray[2][1] = "BEFORE :: " & $pregvpFSourceK & " :: ifempty :: " & $pregvpFFlag
+		$pregvpFArray[2][2] = "PROG"
+		For $pregvpFArrayi = 0 To UBound($pregvpFArray) - 1
+			_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($pregvpFArray, $pregvpFArrayi, $pregvpFArrayi))
+		Next
+		$AfterSecArray[0][0] = $AfterSecArray[0][0] + 3
+	Else
+		Local $pregvpFError = MsgBox(64, $gapTitle, "The ""(regvalue)"" function can't be called from the """ & $pregvpFCaller & """ section.")
+	EndIf
+EndFunc   ;==>pregvaluep
+;
+;===============================================================================================================
+; Function:		RTLdir() - <-dir
+;===============================================================================================================
+Func RTLdir($rtldirFCaller, $rtldirFSource, $rtldirFTarget = "NULL", $rtldirFFlag = "NULL")
+	If $rtldirFCaller = "BEFORE" Or $rtldirFCaller = "AFTER" Then
+		LTRdir($rtldirFCaller, $rtldirFTarget, $rtldirFSource, $rtldirFFlag)
+	Else
+		Local $rtldirFError = MsgBox(64, $gapTitle, "The ""<-dir"" function can't be called from the """ & $rtldirFCaller & """ section.")
+	EndIf
+EndFunc   ;==>RTLdir
+;
+;===============================================================================================================
+; Function:		LTRdir() - ->dir
+;===============================================================================================================
+Func LTRdir($ltrdirFCaller, $ltrdirFSource, $ltrdirFTarget = "NULL", $ltrdirFFlag = "NULL")
+	If $ltrdirFCaller = "BEFORE" Or $ltrdirFCaller = "AFTER" Then
+		If $ltrdirFSource = "NULL" Then $ltrdirFSource = "{GAPROOT}\Settings"
+		$ltrdirFSource = _PathFull(FindReplaceX("MAINPROGRAM", $ltrdirFSource), @ScriptDir)
+		If $ltrdirFTarget = "NULL" Then $ltrdirFTarget = "{GAPROOT}\Settings"
+		$ltrdirFTarget = _PathFull(FindReplaceX("MAINPROGRAM", $ltrdirFTarget), @ScriptDir)
+		$ltrdirFFlag = FindReplaceX("MAINPROGRAM", $ltrdirFFlag)
+		If $ltrdirFFlag = "NULL" Then $ltrdirFFlag = "copy, overwrite"
+		If $ltrdirFSource <> $ltrdirFTarget Then
+			Local $ltrdirFCheck1 = FileExists($ltrdirFSource)
+			If $ltrdirFCheck1 = 1 Then
+				Local $ltrdirFCheck2 = StringInStr($ltrdirFFlag, "move", 0, 1)
+				Local $ltrdirFCheck3 = StringInStr($ltrdirFFlag, "no overwrite", 0, 1)
+				If $ltrdirFCheck2 > 0 Then
+					Local $ltrdirFCFlag = "move"
+				Else
+					Local $ltrdirFCFlag = "copy"
+				EndIf
+				If $ltrdirFCheck3 > 0 Then
+					Local $ltrdirFOFlag = "no overwrite"
+				Else
+					Local $ltrdirFOFlag = "overwrite"
+				EndIf
+				Select
+					Case $ltrdirFCFlag = "copy" And $ltrdirFOFlag = "overwrite"
+						DirCopy($ltrdirFSource, $ltrdirFTarget, 1)
+
+					Case $ltrdirFCFlag = "copy" And $ltrdirFOFlag = "no overwrite"
+						DirCopy($ltrdirFSource, $ltrdirFTarget, 0)
+
+					Case $ltrdirFCFlag = "move" And $ltrdirFOFlag = "overwrite"
+						If FileExists($ltrdirFTarget) = 1 Then DirRemove($ltrdirFTarget, 1)
+						DirMove($ltrdirFSource, $ltrdirFTarget, 1)
+
+					Case $ltrdirFCFlag = "move" And $ltrdirFOFlag = "no overwrite"
+						DirMove($ltrdirFSource, $ltrdirFTarget, 0)
+
+				EndSelect
+			EndIf
+		EndIf
+	Else
+		Local $ltrdirFError = MsgBox(64, $gapTitle, "The ""->dir"" function can't be called from the """ & $ltrdirFCaller & """ section.")
+	EndIf
+EndFunc   ;==>LTRdir
+;
+;===============================================================================================================
+; Function:		RTLfile() - <-file
+;===============================================================================================================
+Func RTLfile($rtlfileFCaller, $rtlfileFSource, $rtlfileFTarget = "NULL", $rtlfileFFlag = "NULL")
+	If $rtlfileFCaller = "BEFORE" Or $rtlfileFCaller = "AFTER" Then
+		LTRfile($rtlfileFCaller, $rtlfileFTarget, $rtlfileFSource, $rtlfileFFlag)
+	Else
+		Local $rtlfileFError = MsgBox(64, $gapTitle, "The ""<-file"" function can't be called from the """ & $rtlfileFCaller & """ section.")
+	EndIf
+EndFunc   ;==>RTLfile
+;
+;===============================================================================================================
+; Function:		LTRfile() - ->file
+;===============================================================================================================
+Func LTRfile($ltrfileFCaller, $ltrfileFSource, $ltrfileFTarget = "NULL", $ltrfileFFlag = "NULL")
+	If $ltrfileFCaller = "BEFORE" Or $ltrfileFCaller = "AFTER" Then
+		If $ltrfileFTarget <> "NULL" And StringRegExp($ltrfileFTarget, "^.*\\(.*\..*)$", 0) = 1 And $ltrfileFSource = "NULL" Then
+			$ltrfileFSource = StringRegExp($ltrfileFTarget, "^.*\\(.*\..*)$", 1)
+			$ltrfileFSource = "{GAPROOT}\" & $ltrfileFSource[0]
+		EndIf
+		$ltrfileFSource = _PathFull(FindReplaceX("MAINPROGRAM", $ltrfileFSource), @ScriptDir)
+		If $ltrfileFTarget = "NULL" Then $ltrfileFTarget = "{GAPROOT}"
+		$ltrfileFTarget = _PathFull(FindReplaceX("MAINPROGRAM", $ltrfileFTarget), @ScriptDir)
+		$ltrfileFFlag = FindReplaceX("MAINPROGRAM", $ltrfileFFlag)
+		If $ltrfileFFlag = "NULL" Then $ltrfileFFlag = "copy, overwrite"
+		If $ltrfileFSource <> $ltrfileFTarget Then
+			Local $ltrfileFCheck1 = FileExists($ltrfileFSource)
+			If $ltrfileFCheck1 = 1 Then
+				Local $ltrfileFCheck2 = StringInStr($ltrfileFFlag, "move", 0, 1)
+				Local $ltrfileFCheck3 = StringInStr($ltrfileFFlag, "no overwrite", 0, 1)
+				If $ltrfileFCheck2 > 0 Then
+					Local $ltrfileFCFlag = "move"
+				Else
+					Local $ltrfileFCFlag = "copy"
+				EndIf
+				If $ltrfileFCheck3 > 0 Then
+					Local $ltrfileFOFlag = "no overwrite"
+				Else
+					Local $ltrfileFOFlag = "overwrite"
+				EndIf
+				Select
+					Case $ltrfileFCFlag = "copy" And $ltrfileFOFlag = "overwrite"
+						FileCopy($ltrfileFSource, $ltrfileFTarget, 9)
+
+					Case $ltrfileFCFlag = "copy" And $ltrfileFOFlag = "no overwrite"
+						FileCopy($ltrfileFSource, $ltrfileFTarget, 8)
+
+					Case $ltrfileFCFlag = "move" And $ltrfileFOFlag = "overwrite"
+						FileMove($ltrfileFSource, $ltrfileFTarget, 9)
+
+					Case $ltrfileFCFlag = "move" And $ltrfileFOFlag = "no overwrite"
+						FileMove($ltrfileFSource, $ltrfileFTarget, 8)
+
+				EndSelect
+			EndIf
+		EndIf
+	Else
+		Local $ltrfileFError = MsgBox(64, $gapTitle, "The ""->file"" function can't be called from the """ & $ltrfileFCaller & """ section.")
+	EndIf
+EndFunc   ;==>LTRfile
+;
+;===============================================================================================================
+; Function:		RTLregkey() - <-regkey
+;===============================================================================================================
+Func RTLregkey($rtlregkFCaller, $rtlregkFSource, $rtlregkFTarget, $rtlregkFCFlag = "NULL", $rtlregkFFlag = "NULL")
+	If $rtlregkFCaller = "BEFORE" Or $rtlregkFCaller = "AFTER" Then
+		LTRregkey($rtlregkFCaller, $rtlregkFTarget, $rtlregkFSource, $rtlregkFCFlag, $rtlregkFFlag)
+	Else
+		Local $rtlregkFError = MsgBox(64, $gapTitle, "The ""<-regkey"" function can't be called from the """ & $rtlregkFCaller & """ section.")
+	EndIf
+EndFunc   ;==>RTLregkey
+;
+;===============================================================================================================
+; Function:		LTRregkey() - ->regkey
+;===============================================================================================================
+Func LTRregkey($ltrregkFCaller, $ltrregkFSource, $ltrregkFTarget, $ltrregkFCFlag = "NULL", $ltrregkFFlag = "NULL")
+	If $ltrregkFCaller = "BEFORE" Or $ltrregkFCaller = "AFTER" Then
+		$ltrregkFSource = FindReplaceX("MAINPROGRAM", $ltrregkFSource, 2)
+		$ltrregkFTarget = FindReplaceX("MAINPROGRAM", $ltrregkFTarget, 2)
+		$ltrregkFCFlag = FindReplaceX("MAINPROGRAM", $ltrregkFCFlag)
+		If $ltrregkFCFlag = "NULL" Then $ltrregkFCFlag = "copy"
+		$ltrregkFFlag = FindReplaceX("MAINPROGRAM", $ltrregkFFlag)
+		If $ltrregkFFlag = "NULL" Then $ltrregkFFlag = "x86"
+		Local $ltrregkFCheck1 = StringRight($ltrregkFSource, 1)
+		If $ltrregkFCheck1 = "\" Then $ltrregkFSource = StringReplace($ltrregkFSource, "\", "", -1, 1)
+		Local $ltrregkFCheck2 = StringRight($ltrregkFTarget, 1)
+		If $ltrregkFCheck2 = "\" Then $ltrregkFTarget = StringReplace($ltrregkFTarget, "\", "", -1, 1)
+		If $ltrregkFSource <> $ltrregkFTarget Then
+			Local $ltrregkFCheck3 = RegKeyExists("MAINPROGRAM", $ltrregkFSource, $ltrregkFFlag)
+			If $ltrregkFCheck3 > 0 Then
+				If $ltrregkFFlag = "x86" Then $ltrregkFFlag = "/reg:32"
+				If $ltrregkFFlag = "x64" Then $ltrregkFFlag = "/reg:64"
+				If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $ltrregkFFlag = ""
+				RunWait(@ComSpec & " /C REG COPY """ & $ltrregkFSource & """ """ & $ltrregkFTarget & """ /s /f " & $ltrregkFFlag, "", @SW_HIDE)
+				If $ltrregkFCFlag = "move" Then RunWait(@ComSpec & " /C REG DELETE """ & $ltrregkFSource & """ /f " & $ltrregkFFlag, "", @SW_HIDE)
+			EndIf
+		EndIf
+	Else
+		Local $ltrregkFError = MsgBox(64, $gapTitle, "The ""->regkey"" function can't be called from the """ & $ltrregkFCaller & """ section.")
+	EndIf
+EndFunc   ;==>LTRregkey
+;
+;===============================================================================================================
+; Function:		RTLregvalue() - <-regvalue
+;===============================================================================================================
+Func RTLregvalue($rtlregvFCaller, $rtlregvFSource, $rtlregvFTarget, $rtlregvFCFlag = "NULL", $rtlregvFFlag = "NULL")
+	If $rtlregvFCaller = "BEFORE" Or $rtlregvFCaller = "AFTER" Then
+		LTRregvalue($rtlregvFCaller, $rtlregvFTarget, $rtlregvFSource, $rtlregvFCFlag, $rtlregvFFlag)
+	Else
+		Local $rtlregvFError = MsgBox(64, $gapTitle, "The ""<-regvalue"" function can't be called from the """ & $rtlregvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>RTLregvalue
+;
+;===============================================================================================================
+; Function:		LTRregvalue() - ->regvalue
+;===============================================================================================================
+Func LTRregvalue($ltrregvFCaller, $ltrregvFSource, $ltrregvFTarget, $ltrregvFCFlag = "NULL", $ltrregvFFlag = "NULL")
+	If $ltrregvFCaller = "BEFORE" Or $ltrregvFCaller = "AFTER" Then
+		$ltrregvFSource = FindReplaceX("MAINPROGRAM", $ltrregvFSource, 2)
+		$ltrregvFTarget = FindReplaceX("MAINPROGRAM", $ltrregvFTarget, 2)
+		$ltrregvFCFlag = FindReplaceX("MAINPROGRAM", $ltrregvFCFlag)
+		If $ltrregvFCFlag = "NULL" Then $ltrregvFCFlag = "copy"
+		$ltrregvFFlag = FindReplaceX("MAINPROGRAM", $ltrregvFFlag)
+		If $ltrregvFFlag = "NULL" Then $ltrregvFFlag = "x86"
+		Local $ltrregvFCheck1 = StringRight($ltrregvFSource, 1)
+		If $ltrregvFCheck1 = "\" Then $ltrregvFSource = StringReplace($ltrregvFSource, "\", "", -1, 1)
+		Local $ltrregvFCheck2 = StringRight($ltrregvFTarget, 1)
+		If $ltrregvFCheck2 = "\" Then $ltrregvFTarget = StringReplace($ltrregvFTarget, "\", "", -1, 1)
+		If $ltrregvFSource <> $ltrregvFTarget Then
+			Local $ltrregvFCheck3 = StringSplit($ltrregvFSource, "\", 1)
+			Local $ltrregvFSourceK = StringReplace($ltrregvFSource, "\" & $ltrregvFCheck3[$ltrregvFCheck3[0]], "", -1, 1)
+			Local $ltrregvFSourceV = $ltrregvFCheck3[$ltrregvFCheck3[0]]
+			Local $ltrregvFCheck4 = StringSplit($ltrregvFTarget, "\", 1)
+			Local $ltrregvFTargetK = StringReplace($ltrregvFTarget, "\" & $ltrregvFCheck4[$ltrregvFCheck4[0]], "", -1, 1)
+			Local $ltrregvFTargetV = $ltrregvFCheck4[$ltrregvFCheck4[0]]
+			Local $ltrregvFCheck5 = RegValExists("MAINPROGRAM", $ltrregvFSourceK, $ltrregvFSourceV, $ltrregvFFlag)
+			If $ltrregvFCheck5 = 1 Then
+				If $ltrregvFFlag = "x64" Then
+					$ltrregvFSourceK = StringReplace($ltrregvFSourceK, $ltrregvFCheck3[1] & "\", $ltrregvFCheck3[1] & "64\", 1, 1)
+					$ltrregvFTargetK = StringReplace($ltrregvFTargetK, $ltrregvFCheck3[1] & "\", $ltrregvFCheck3[1] & "64\", 1, 1)
+				EndIf
+				Local $ltrregvFSourceVData = RegRead($ltrregvFSourceK, $ltrregvFSourceV)
+				Local $ltrregvFSourceVType = @extended
+				Select
+					Case $ltrregvFSourceVType = 0
+						$ltrregvFSourceVType = "REG_NONE"
+
+					Case $ltrregvFSourceVType = 1
+						$ltrregvFSourceVType = "REG_SZ"
+
+					Case $ltrregvFSourceVType = 2
+						$ltrregvFSourceVType = "REG_EXPAND_SZ"
+
+					Case $ltrregvFSourceVType = 3
+						$ltrregvFSourceVType = "REG_BINARY"
+
+					Case $ltrregvFSourceVType = 4
+						$ltrregvFSourceVType = "REG_DWORD"
+
+					Case $ltrregvFSourceVType = 5
+						$ltrregvFSourceVType = "REG_DWORD_BIG_ENDIAN"
+
+					Case $ltrregvFSourceVType = 6
+						$ltrregvFSourceVType = "REG_LINK"
+
+					Case $ltrregvFSourceVType = 7
+						$ltrregvFSourceVType = "REG_MULTI_SZ"
+
+					Case $ltrregvFSourceVType = 8
+						$ltrregvFSourceVType = "REG_RESOURCE_LIST"
+
+					Case $ltrregvFSourceVType = 9
+						$ltrregvFSourceVType = "REG_FULL_RESOURCE_DESCRIPTOR"
+
+					Case $ltrregvFSourceVType = 10
+						$ltrregvFSourceVType = "REG_RESOURCE_REQUIREMENTS_LIST"
+
+					Case $ltrregvFSourceVType = 11
+						$ltrregvFSourceVType = "REG_QWORD"
+
+				EndSelect
+				RegWrite($ltrregvFTargetK, $ltrregvFTargetV, $ltrregvFSourceVType, $ltrregvFSourceVData)
+				If $ltrregvFCFlag = "move" Then RegDelete($ltrregvFSourceK, $ltrregvFSourceV)
+			EndIf
+		EndIf
+	Else
+		Local $ltrregvFError = MsgBox(64, $gapTitle, "The ""->regvalue"" function can't be called from the """ & $ltrregvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>LTRregvalue
+;
+;===============================================================================================================
+; Function:		plusdir() - +dir
+;===============================================================================================================
+Func plusdir($pdirFCaller, $pdirFDir)
+	If $pdirFCaller = "BEFORE" Or $pdirFCaller = "AFTER" Then
+		$pdirFDir = _PathFull(FindReplaceX("MAINPROGRAM", $pdirFDir), @ScriptDir)
+		Local $pdirFCheck1 = StringRight($pdirFDir, 1)
+		If $pdirFCheck1 = "\" Then $pdirFDir = StringReplace($pdirFDir, "\", "", -1, 1)
+		If FileExists($pdirFDir) = 0 Then DirCreate($pdirFDir)
+	Else
+		Local $pdirFError = MsgBox(64, $gapTitle, "The ""+dir"" function can't be called from the """ & $pdirFCaller & """ section.")
+	EndIf
+EndFunc   ;==>plusdir
+;
+;===============================================================================================================
+; Function:		plusfile() - +file
+;===============================================================================================================
+Func plusfile($pfileFCaller, $pfileFFile, $pfileFFlag = "NULL", $pfileFText = "NULL")
+	If $pfileFCaller = "BEFORE" Or $pfileFCaller = "AFTER" Then
+		$pfileFFile = _PathFull(FindReplaceX("MAINPROGRAM", $pfileFFile), @ScriptDir)
+		$pfileFFlag = FindReplaceX("MAINPROGRAM", $pfileFFlag)
+		If $pfileFFlag = "NULL" Then $pfileFFlag = "overwrite"
+		$pfileFText = FindReplaceX("MAINPROGRAM", $pfileFText)
+		If $pfileFText = "NULL" Then $pfileFText = ""
+		$pfileFText = StringReplace($pfileFText, "*NULL*", "NULL", 0, 0)
+		Local $pfileFCheck1 = FileExists($pfileFFile)
+		Select
+			Case $pfileFFlag = "overwrite"
+				Local $pfileFCheck2 = FileOpen($pfileFFile, 10)
+				If $pfileFText <> "" Then FileWrite($pfileFCheck2, $pfileFText)
+				FileClose($pfileFCheck2)
+
+			Case $pfileFFlag = "no overwrite" And $pfileFCheck1 = 0
+				Local $pfileFCheck2 = FileOpen($pfileFFile, 10)
+				If $pfileFText <> "" Then FileWrite($pfileFCheck2, $pfileFText)
+				FileClose($pfileFCheck2)
+
+		EndSelect
+	Else
+		Local $pfileFError = MsgBox(64, $gapTitle, "The ""+file"" function can't be called from the """ & $pfileFCaller & """ section.")
+	EndIf
+EndFunc   ;==>plusfile
+;
+;===============================================================================================================
+; Function:		plusregkey() - +regkey
+;===============================================================================================================
+Func plusregkey($pregkFCaller, $pregkFKey, $pregkFFlag = "NULL")
+	If $pregkFCaller = "BEFORE" Or $pregkFCaller = "AFTER" Then
+		$pregkFKey = FindReplaceX("MAINPROGRAM", $pregkFKey, 2)
+		$pregkFFlag = FindReplaceX("MAINPROGRAM", $pregkFFlag)
+		If $pregkFFlag = "NULL" Then $pregkFFlag = "x86"
+		Local $pregkFCheck1 = StringRight($pregkFKey, 1)
+		If $pregkFCheck1 = "\" Then $pregkFKey = StringReplace($pregkFKey, "\", "", -1, 1)
+		If $pregkFFlag = "x86" Then $pregkFFlag = "/reg:32"
+		If $pregkFFlag = "x64" Then $pregkFFlag = "/reg:64"
+		If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $pregkFFlag = ""
+		RunWait(@ComSpec & " /C REG ADD """ & $pregkFKey & """ /f " & $pregkFFlag, "", @SW_HIDE)
+	Else
+		Local $pregkFError = MsgBox(64, $gapTitle, "The ""+regkey"" function can't be called from the """ & $pregkFCaller & """ section.")
+	EndIf
+EndFunc   ;==>plusregkey
+;
+;===============================================================================================================
+; Function:		plusregvalue() - +regvalue
+;===============================================================================================================
+Func plusregvalue($pregvFCaller, $pregvFKey, $pregvFVal, $pregvFData, $pregvFType = "NULL", $pregvFSep = "NULL", $pregvFFlag = "NULL")
+	If $pregvFCaller = "BEFORE" Or $pregvFCaller = "AFTER" Then
+		$pregvFKey = FindReplaceX("MAINPROGRAM", $pregvFKey, 2)
+		$pregvFVal = FindReplaceX("MAINPROGRAM", $pregvFVal)
+		$pregvFData = FindReplaceX("MAINPROGRAM", $pregvFData)
+		$pregvFType = FindReplaceX("MAINPROGRAM", $pregvFType)
+		If $pregvFType = "NULL" Then $pregvFType = "REG_SZ"
+		$pregvFSep = FindReplaceX("MAINPROGRAM", $pregvFSep)
+		$pregvFFlag = FindReplaceX("MAINPROGRAM", $pregvFFlag)
+		If $pregvFFlag = "NULL" Then $pregvFFlag = "x86"
+		Local $pregvFCheck1 = StringRight($pregvFKey, 1)
+		If $pregvFCheck1 = "\" Then $pregvFKey = StringReplace($pregvFKey, "\", "", -1, 1)
+		If $pregvFFlag = "x86" Then $pregvFFlag = "/reg:32"
+		If $pregvFFlag = "x64" Then $pregvFFlag = "/reg:64"
+		If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $pregvFFlag = ""
+		If $pregvFType = "REG_MULTI_SZ" And $pregvFSep <> "NULL" Then
+			RunWait(@ComSpec & " /C REG ADD """ & $pregvFKey & """ /v """ & $pregvFVal & """ /t """ & $pregvFType & """ /s """ & $pregvFSep & """ /d """ & $pregvFData & """ /f " & $pregvFFlag, "", @SW_HIDE)
+		Else
+			RunWait(@ComSpec & " /C REG ADD """ & $pregvFKey & """ /v """ & $pregvFVal & """ /t """ & $pregvFType & """ /d """ & $pregvFData & """ /f " & $pregvFFlag, "", @SW_HIDE)
+		EndIf
+	Else
+		Local $pregvFError = MsgBox(64, $gapTitle, "The ""+regvalue"" function can't be called from the """ & $pregvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>plusregvalue
+;
+;===============================================================================================================
+; Function:		minusdir() - -dir
+;===============================================================================================================
+Func minusdir($mdirFCaller, $mdirFDir, $mdirFFlag = "NULL")
+	If $mdirFCaller = "BEFORE" Or $mdirFCaller = "AFTER" Then
+		$mdirFDir = _PathFull(FindReplaceX("MAINPROGRAM", $mdirFDir), @ScriptDir)
+		$mdirFFlag = FindReplaceX("MAINPROGRAM", $mdirFFlag)
+		Local $mdirFCheck1 = StringRight($mdirFDir, 1)
+		If $mdirFCheck1 = "\" Then $mdirFDir = StringReplace($mdirFDir, "\", "", -1, 1)
+		If FileExists($mdirFDir) = 1 Then
+			Local $mdirFCheck2 = StringSplit($mdirFDir, "\", 1)
+			Local $mdirFCheck3 = $mdirFCheck2[$mdirFCheck2[0]]
+			$mdirFCheck2 = StringReplace($mdirFDir, "\" & $mdirFCheck3, "", -1, 1)
+			Local $mdirFDirArray = _FileListToArray($mdirFCheck2, $mdirFCheck3, 2, True)
+			For $mdirFi = 1 To $mdirFDirArray[0]
+				If $mdirFFlag = "ifempty" Then
+					DirRemove($mdirFDirArray[$mdirFi], 0)
+				Else
+					DirRemove($mdirFDirArray[$mdirFi], 1)
+				EndIf
+			Next
+		EndIf
+	Else
+		Local $mdirFError = MsgBox(64, $gapTitle, "The ""-dir"" function can't be called from the """ & $mdirFCaller & """ section.")
+	EndIf
+EndFunc   ;==>minusdir
+;
+;===============================================================================================================
+; Function:		minusfile() - -file
+;===============================================================================================================
+Func minusfile($mfileFCaller, $mfileFFile)
+	If $mfileFCaller = "BEFORE" Or $mfileFCaller = "AFTER" Then
+		$mfileFFile = _PathFull(FindReplaceX("MAINPROGRAM", $mfileFFile), @ScriptDir)
+		If FileExists($mfileFFile) = 1 Then
+			FileDelete($mfileFFile)
+		EndIf
+	Else
+		Local $mfileFError = MsgBox(64, $gapTitle, "The ""-file"" function can't be called from the """ & $mfileFCaller & """ section.")
+	EndIf
+EndFunc   ;==>minusfile
+;
+;===============================================================================================================
+; Function:		minusregkey() - -regkey
+;===============================================================================================================
+Func minusregkey($mregkFCaller, $mregkFKey, $mregkFEFlag = "NULL", $mregkFFlag = "NULL")
+	If $mregkFCaller = "BEFORE" Or $mregkFCaller = "AFTER" Then
+		$mregkFKey = FindReplaceX("MAINPROGRAM", $mregkFKey, 2)
+		$mregkFEFlag = FindReplaceX("MAINPROGRAM", $mregkFEFlag)
+		$mregkFFlag = FindReplaceX("MAINPROGRAM", $mregkFFlag)
+		If $mregkFFlag = "NULL" Then $mregkFFlag = "x86"
+		Local $mregkFCheck1 = StringRight($mregkFKey, 1)
+		If $mregkFCheck1 = "\" Then $mregkFKey = StringReplace($mregkFKey, "\", "", -1, 1)
+		Local $mregkFCheck2 = RegKeyExists("MAINPROGRAM", $mregkFKey, $mregkFFlag)
+		If $mregkFCheck2 > 0 Then
+			If $mregkFFlag = "x86" Then $mregkFFlag = "/reg:32"
+			If $mregkFFlag = "x64" Then $mregkFFlag = "/reg:64"
+			If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $mregkFFlag = ""
+			Select
+				Case $mregkFEFlag = "ifempty" And $mregkFCheck2 = 2
+					RunWait(@ComSpec & " /C REG DELETE """ & $mregkFKey & """ /f " & $mregkFFlag, "", @SW_HIDE)
+
+				Case $mregkFEFlag <> "ifempty"
+					RunWait(@ComSpec & " /C REG DELETE """ & $mregkFKey & """ /f " & $mregkFFlag, "", @SW_HIDE)
+
+			EndSelect
+		EndIf
+	Else
+		Local $mregkFError = MsgBox(64, $gapTitle, "The ""-regkey"" function can't be called from the """ & $mregkFCaller & """ section.")
+	EndIf
+EndFunc   ;==>minusregkey
+;
+;===============================================================================================================
+; Function:		minusregvalue() - -regvalue
+;===============================================================================================================
+Func minusregvalue($mregvFCaller, $mregvFKey, $mregvFVal, $mregvFFlag = "NULL")
+	If $mregvFCaller = "BEFORE" Or $mregvFCaller = "AFTER" Then
+		$mregvFKey = FindReplaceX("MAINPROGRAM", $mregvFKey, 2)
+		$mregvFVal = FindReplaceX("MAINPROGRAM", $mregvFVal)
+		$mregvFFlag = FindReplaceX("MAINPROGRAM", $mregvFFlag)
+		If $mregvFFlag = "NULL" Then $mregvFFlag = "x86"
+		Local $mregvFCheck1 = StringRight($mregvFKey, 1)
+		If $mregvFCheck1 = "\" Then $mregvFKey = StringReplace($mregvFKey, "\", "", -1, 1)
+		Local $mregvFCheck2 = RegValExists("MAINPROGRAM", $mregvFKey, $mregvFVal, $mregvFFlag)
+		If $mregvFCheck2 = 1 Then
+			If $mregvFFlag = "x86" Then $mregvFFlag = "/reg:32"
+			If $mregvFFlag = "x64" Then $mregvFFlag = "/reg:64"
+			If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $mregvFFlag = ""
+			RunWait(@ComSpec & " /C REG DELETE """ & $mregvFKey & """ /v """ & $mregvFVal & """ /f " & $mregvFFlag, "", @SW_HIDE)
+		EndIf
+	Else
+		Local $mregvFError = MsgBox(64, $gapTitle, "The ""-regvalue"" function can't be called from the """ & $mregvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>minusregvalue
+;
+;===============================================================================================================
+; Function:		RegKeyExists()
+;===============================================================================================================
+Func RegKeyExists($regkeyeFCaller, $regkeyeFKey, $regkeyeFFlag)
+	If $regkeyeFCaller = "MAINPROGRAM" Then
+		If $regkeyeFFlag = "x86" Then $regkeyeFFlag = "/reg:32"
+		If $regkeyeFFlag = "x64" Then $regkeyeFFlag = "/reg:64"
+		If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $regkeyeFFlag = ""
+		Local $regkeyeFCheck1 = StringRight($regkeyeFKey, 1)
+		If $regkeyeFCheck1 = "\" Then $regkeyeFKey = StringReplace($regkeyeFKey, "\", "", -1, 1)
+		Local $regkeyeFKeyExists = 0
+		If $regkeyeFFlag = "/reg:64" Then
+			Local $regkeyeFKeyTemp = StringSplit($regkeyeFKey, "\", 1)
+			Local $regkeyeFCheck2 = StringReplace($regkeyeFKey, $regkeyeFKeyTemp[1], $regkeyeFKeyTemp[1] & "64", 1, 1)
+		Else
+			Local $regkeyeFCheck2 = $regkeyeFKey
+		EndIf
+		Local $regkeyeFCheck3 = RegRead($regkeyeFCheck2, "")
+		$regkeyeFCheck3 = @error
+		If $regkeyeFCheck3 <= 0 Then $regkeyeFKeyExists = 1
+		If $regkeyeFKeyExists = 1 Then
+			Local $regkeyeFPID = Run(@ComSpec & " /C REG QUERY """ & $regkeyeFKey & """ /s " & $regkeyeFFlag, "", @SW_HIDE, 0x2)
+			ProcessWaitClose($regkeyeFPID)
+			Local $regkeyeFOut = StdoutRead($regkeyeFPID)
+			Local $regkeyeFOutArray = StringSplit(StringTrimRight(StringStripCR($regkeyeFOut), StringLen(@CRLF)), @CRLF)
+			If $regkeyeFOutArray[0] <= 1 Then $regkeyeFKeyExists = 2
+		EndIf
+		Return $regkeyeFKeyExists
+	Else
+		Local $regkeyeFError = MsgBox(64, $gapTitle, "The ""RegKeyExists"" function can't be called from the """ & $regkeyeFCaller & """ section.")
+	EndIf
+EndFunc   ;==>RegKeyExists
+;
+;===============================================================================================================
+; Function:		RegValExists()
+;===============================================================================================================
+Func RegValExists($regvaleFCaller, $regvaleFKey, $regvaleFVal, $regvaleFFlag)
+	If $regvaleFCaller = "MAINPROGRAM" Then
+		Local $regvaleFCheck1 = StringRight($regvaleFKey, 1)
+		If $regvaleFCheck1 = "\" Then $regvaleFKey = StringReplace($regvaleFKey, "\", "", -1, 1)
+		Local $regvaleFValExists = 0
+		If $regvaleFFlag = "x64" Then
+			Local $regvaleFKeyTemp = StringSplit($regvaleFKey, "\", 1)
+			Local $regvaleFCheck2 = StringReplace($regvaleFKey, $regvaleFKeyTemp[1], $regvaleFKeyTemp[1] & "64", 1, 1)
+		Else
+			Local $regvaleFCheck2 = $regvaleFKey
+		EndIf
+		Local $regvaleFCheck3 = RegRead($regvaleFCheck2, $regvaleFVal)
+		$regvaleFCheck3 = @error
+		If $regvaleFCheck3 = 0 Or $regvaleFCheck3 = -2 Then $regvaleFValExists = 1
+		Return $regvaleFValExists
+	Else
+		Local $regvaleFError = MsgBox(64, $gapTitle, "The ""RegValExists"" function can't be called from the """ & $regvaleFCaller & """ section.")
+	EndIf
+EndFunc   ;==>RegValExists
+;
+;===============================================================================================================
+; Function:		attributes()
+;===============================================================================================================
+Func attributes($attribFCaller, $attribFFile, $attribFVal = "NULL")
+	If $attribFCaller = "BEFORE" Or $attribFCaller = "AFTER" Then
+		$attribFFile = _PathFull(FindReplaceX("MAINPROGRAM", $attribFFile), @ScriptDir)
+		$attribFVal = StringSplit(StringReplace(FindReplaceX("MAINPROGRAM", $attribFVal), " ", ""), ",", 1)
+		If $attribFVal[0] = 1 And $attribFVal[1] = "NULL" Then $attribFVal[1] = "normal"
+		Local $attribFCheck1 = FileExists($attribFFile)
+		If $attribFCheck1 = 1 Then
+			FileSetAttrib($attribFFile, "-RASHNOT", 0)
+			Local $attribFFileOpen = DllCall("kernel32.dll", "handle", "CreateFileW", "wstr", $attribFFile, "dword", BitOR(0x80000000, 0x40000000), "dword", BitOR(0x00000001, 0x00000002), "struct*", 0, "dword", 3, "dword", 0x02000000, "handle", 0)
+			$attribFFileOpen = $attribFFileOpen[0]
+			DllCall("kernel32.dll", "bool", "DeviceIoControl", "handle", $attribFFileOpen, "dword", 0x0009C040, "ushort*", 0x0000, "dword", 2, "ptr", 0, "dword", 0, "dword*", 0, "ptr", 0)
+			For $attribFi = 1 To $attribFVal[0]
+				Local $attribFValL = StringLeft($attribFVal[$attribFi], 1)
+				If $attribFValL = "C" Then
+					DllCall("kernel32.dll", "bool", "DeviceIoControl", "handle", $attribFFileOpen, "dword", 0x0009C040, "ushort*", 0x0001, "dword", 2, "ptr", 0, "dword", 0, "dword*", 0, "ptr", 0)
+				Else
+					FileSetAttrib($attribFFile, "+" & $attribFValL, 0)
+				EndIf
+			Next
+		EndIf
+	Else
+		Local $attribFError = MsgBox(64, $gapTitle, "The ""attributes"" function can't be called from the """ & $attribFCaller & """ section.")
+	EndIf
+EndFunc   ;==>attributes
+;
+;===============================================================================================================
+; Function:		batch()
+;===============================================================================================================
+Func batch($batchFCaller, $batchFApp, $batchFShow = "NULL")
+	If $batchFCaller = "BEFORE" Or $batchFCaller = "AFTER" Then
+		$batchFApp = _PathFull(FindReplaceX("MAINPROGRAM", $batchFApp), @ScriptDir)
+		$batchFShow = FindReplaceX("MAINPROGRAM", $batchFShow)
+		If $batchFShow = "NULL" Then $batchFShow = "hide"
+		Local $batchFCheck1 = FileExists($batchFApp)
+		If $batchFCheck1 = 1 Then
+			Local $batchFAppWorkDir = StringRegExp($batchFApp, "(?i)(.*)\\", 1)
+			$batchFAppWorkDir = $batchFAppWorkDir[0]
+			If $batchFShow = "hide" Then
+				RunWait(@ComSpec & " /C """ & $batchFApp & """", $batchFAppWorkDir, @SW_HIDE)
+			ElseIf $batchFShow = "show" Then
+				RunWait(@ComSpec & " /K """ & $batchFApp & """", $batchFAppWorkDir, @SW_SHOW)
+			EndIf
+		EndIf
+	Else
+		Local $batchFError = MsgBox(64, $gapTitle, "The ""batch"" function can't be called from the """ & $batchFCaller & """ section.")
+	EndIf
+EndFunc   ;==>batch
+;
+;===============================================================================================================
+; Function:		clip()
+;===============================================================================================================
+Func clip($clipFCaller, $clipFText)
+	If $clipFCaller = "BEFORE" Or $clipFCaller = "AFTER" Then
+		$clipFText = FindReplaceX("MAINPROGRAM", $clipFText)
+		If $clipFText = "*EMPTY*" Then
+			ClipPut("")
+		Else
+			ClipPut($clipFText)
+		EndIf
+	Else
+		Local $clipFError = MsgBox(64, $gapTitle, "The ""clip"" function can't be called from the """ & $clipFCaller & """ section.")
+	EndIf
+EndFunc   ;==>clip
+;
+;===============================================================================================================
+; Function:		date()
+;===============================================================================================================
+Func date($dateFCaller, $dateFFile, $dateFDate = "NULL", $dateFType = "NULL")
+	If $dateFCaller = "BEFORE" Or $dateFCaller = "AFTER" Then
+		$dateFFile = _PathFull(FindReplaceX("MAINPROGRAM", $dateFFile), @ScriptDir)
+		$dateFDate = StringReplace(StringReplace(StringReplace(StringReplace(FindReplaceX("MAINPROGRAM", $dateFDate), ".", ""), "/", ""), " ", ""), ":", "")
+		If $dateFDate = "NULL" Or $dateFDate = "now" Then $dateFDate = StringReplace(StringReplace(StringReplace(StringReplace(_NowCalc(), ".", ""), "/", ""), " ", ""), ":", "")
+		$dateFType = FindReplaceX("MAINPROGRAM", $dateFType)
+		If $dateFType = "NULL" Then $dateFType = "modified"
+		Local $dateFCheck1 = FileExists($dateFFile)
+		If $dateFCheck1 = 1 Then
+			Select
+				Case $dateFType = "modified"
+					$dateFType = 0
+
+				Case $dateFType = "created"
+					$dateFType = 1
+
+				Case $dateFType = "accessed"
+					$dateFType = 2
+
+				Case Else
+					$dateFType = 0
+
+			EndSelect
+			FileSetTime($dateFFile, $dateFDate, $dateFType, 0)
+		EndIf
+	Else
+		Local $dateFError = MsgBox(64, $gapTitle, "The ""date"" function can't be called from the """ & $dateFCaller & """ section.")
+	EndIf
+EndFunc   ;==>date
+;
+;===============================================================================================================
+; Function:		delay()
+;===============================================================================================================
+Func delay($delayFCaller, $delayFValue)
+	If $delayFCaller = "BEFORE" Or $delayFCaller = "AFTER" Then
+		$delayFValue = FindReplaceX("MAINPROGRAM", $delayFValue)
+		Sleep($delayFValue)
+	Else
+		Local $delayFError = MsgBox(64, $gapTitle, "The ""delay"" function can't be called from the """ & $delayFCaller & """ section.")
+	EndIf
+EndFunc   ;==>delay
+;
+;===============================================================================================================
+; Function:		envvar()
+;===============================================================================================================
+Func envvar($envvFCaller, $envvFVar, $envvFVal)
+	If $envvFCaller = "BEFORE" Or $envvFCaller = "AFTER" Then
+		$envvFVar = FindReplaceX("MAINPROGRAM", $envvFVar)
+		$envvFVal = FindReplaceX("MAINPROGRAM", $envvFVal)
+		EnvSet($envvFVar, $envvFVal)
+	Else
+		Local $envvFError = MsgBox(64, $gapTitle, "The ""envvar"" function can't be called from the """ & $envvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>envvar
+;
+;===============================================================================================================
+; Function:		giniread()
+;===============================================================================================================
+Func giniread($inirFCaller, $inirFFile, $inirFSec, $inirFKey, $inirFVarStore)
+	If $inirFCaller = "BEFORE" Or $inirFCaller = "AFTER" Then
+		$inirFFile = _PathFull(FindReplaceX("MAINPROGRAM", $inirFFile), @ScriptDir)
+		$inirFSec = FindReplaceX("MAINPROGRAM", $inirFSec)
+		$inirFKey = FindReplaceX("MAINPROGRAM", $inirFKey)
+		$inirFVarStore = FindReplaceX("MAINPROGRAM", $inirFVarStore)
+		Local $inirFCheck1 = FileExists($inirFFile)
+		If $inirFCheck1 = 1 Then
+			Select
+				Case $inirFSec = "NULL"
+					Local $inirFReturn = "NOT_FOUND!"
+					Local $inirFFileOpen = FileOpen($inirFFile, 0)
+					If $inirFFileOpen <> -1 Then
+						Local $inirFLinei = 0
+						While 1
+							$inirFLinei = $inirFLinei + 1
+							Local $inirFFileLine = FileReadLine($inirFFileOpen)
+							If @error = -1 Then ExitLoop
+							Select
+								Case StringLeft($inirFFileLine, 1) = "[" And StringRight($inirFFileLine, 1) = "]"
+									FileClose($inirFFileOpen)
+									ExitLoop
+
+								Case StringInStr($inirFFileLine, $inirFKey & "=", 0) > 0
+									FileClose($inirFFileOpen)
+									$inirFReturn = StringReplace($inirFFileLine, $inirFKey & "=", "", 1, 0)
+									ExitLoop
+
+							EndSelect
+						WEnd
+					EndIf
+					uservar($inirFCaller, $inirFVarStore, $inirFReturn)
+
+				Case Else
+					Local $inirFReturn = IniRead($inirFFile, $inirFSec, $inirFKey, "NOT_FOUND!")
+					uservar($inirFCaller, $inirFVarStore, $inirFReturn)
+
+			EndSelect
+		EndIf
+	Else
+		Local $inirFError = MsgBox(64, $gapTitle, "The ""iniread"" function can't be called from the """ & $inirFCaller & """ section.")
+	EndIf
+EndFunc   ;==>giniread
+;
+;===============================================================================================================
+; Function:		giniwrite()
+;===============================================================================================================
+Func giniwrite($iniwFCaller, $iniwFFile, $iniwFSec, $iniwFKey = "NULL", $iniwFVal = "NULL")
+	If $iniwFCaller = "BEFORE" Or $iniwFCaller = "AFTER" Then
+		$iniwFFile = _PathFull(FindReplaceX("MAINPROGRAM", $iniwFFile), @ScriptDir)
+		$iniwFSec = FindReplaceX("MAINPROGRAM", $iniwFSec)
+		$iniwFKey = FindReplaceX("MAINPROGRAM", $iniwFKey)
+		If $iniwFKey = "NULL" Then $iniwFKey = ""
+		$iniwFKey = StringReplace($iniwFKey, "*NULL*", "NULL", 0, 0)
+		$iniwFVal = FindReplaceX("MAINPROGRAM", $iniwFVal)
+		If $iniwFVal = "NULL" Then $iniwFVal = ""
+		$iniwFVal = StringReplace($iniwFVal, "*NULL*", "NULL", 0, 0)
+		Local $iniwFCheck1 = FileExists($iniwFFile)
+		Local $iniwFCheck2 = StringLeft($iniwFSec, 2)
+		If $iniwFCheck1 = 0 Then
+			Local $iniwFFileOpen1 = FileOpen($iniwFFile, 8)
+			FileClose($iniwFFileOpen1)
+		EndIf
+		If $iniwFCheck2 = "--" Then $iniwFSec = StringReplace($iniwFSec, "--", "", 1, 1)
+		Select
+			Case $iniwFCheck2 = "--" And $iniwFSec = "NULL"
+				Local $iniwFFileOpen2 = FileOpen($iniwFFile, 0)
+				If $iniwFFileOpen2 <> -1 Then
+					Local $iniwFLine2i = 1
+					While 1
+						Local $iniwFFileLine2 = FileReadLine($iniwFFileOpen2)
+						If @error = -1 Then ExitLoop
+						Select
+							Case StringLeft($iniwFFileLine2, 1) = "[" And StringRight($iniwFFileLine2, 1) = "]"
+								FileClose($iniwFFileOpen2)
+								ExitLoop
+
+							Case StringLeft($iniwFFileLine2, 1) = ";"
+								$iniwFLine2i = $iniwFLine2i + 1
+
+							Case StringInStr($iniwFFileLine2, "=", 1, 1) > 0
+								_FileWriteToLine($iniwFFile, $iniwFLine2i, "", 1)
+
+							Case Else
+								$iniwFLine2i = $iniwFLine2i + 1
+
+						EndSelect
+					WEnd
+				EndIf
+
+			Case $iniwFCheck2 = "--" And $iniwFSec <> "NULL"
+				$iniwFSec = StringReplace($iniwFSec, "*NULL*", "NULL", 0, 0)
+				IniDelete($iniwFFile, $iniwFSec)
+
+			Case $iniwFCheck2 <> "--" And $iniwFSec = "NULL" And $iniwFKey <> "" And $iniwFVal = ""
+				Local $iniwFFileOpen3 = FileOpen($iniwFFile, 0)
+				If $iniwFFileOpen3 <> -1 Then
+					Local $iniwFLine3i = 0
+					While 1
+						$iniwFLine3i = $iniwFLine3i + 1
+						Local $iniwFFileLine3 = FileReadLine($iniwFFileOpen3)
+						If @error = -1 Then ExitLoop
+						Select
+							Case StringLeft($iniwFFileLine3, 1) = "[" And StringRight($iniwFFileLine3, 1) = "]"
+								FileClose($iniwFFileOpen3)
+								ExitLoop
+
+							Case StringInStr($iniwFFileLine3, $iniwFKey & "=", 0) > 0
+								FileClose($iniwFFileOpen3)
+								_FileWriteToLine($iniwFFile, $iniwFLine3i, "", 1)
+								ExitLoop
+
+						EndSelect
+					WEnd
+				EndIf
+
+			Case $iniwFCheck2 <> "--" And $iniwFSec = "NULL" And $iniwFKey <> "" And $iniwFVal <> ""
+				Local $iniwFFlag = 0
+				Local $iniwFFileOpen4 = FileOpen($iniwFFile, 0)
+				If $iniwFFileOpen4 <> -1 Then
+					Local $iniwFLine4i = 0
+					While 1
+						$iniwFLine4i = $iniwFLine4i + 1
+						Local $iniwFFileLine4 = FileReadLine($iniwFFileOpen4)
+						If @error = -1 Then ExitLoop
+						Select
+							Case StringLeft($iniwFFileLine4, 1) = "[" And StringRight($iniwFFileLine4, 1) = "]"
+								FileClose($iniwFFileOpen4)
+								ExitLoop
+
+							Case StringInStr($iniwFFileLine4, $iniwFKey & "=", 0) > 0
+								FileClose($iniwFFileOpen4)
+								_FileWriteToLine($iniwFFile, $iniwFLine4i, $iniwFKey & "=" & $iniwFVal, 1)
+								$iniwFFlag = 1
+								ExitLoop
+
+						EndSelect
+					WEnd
+				EndIf
+				If $iniwFFlag = 0 Then
+					Local $iniwFFileOpen5 = FileOpen($iniwFFile, 0)
+					If $iniwFFileOpen5 <> -1 Then
+						Local $iniwFLine5i = 1
+						While 1
+							Local $iniwFFileLine5 = FileReadLine($iniwFFileOpen5)
+							If @error = -1 Then ExitLoop
+							Select
+								Case StringLeft($iniwFFileLine5, 1) = ";"
+									$iniwFLine5i = $iniwFLine5i + 1
+
+								Case Else
+									FileClose($iniwFFileOpen5)
+									_FileWriteToLine($iniwFFile, $iniwFLine5i, $iniwFKey & "=" & $iniwFVal, 0)
+									ExitLoop
+
+							EndSelect
+						WEnd
+					EndIf
+				EndIf
+
+			Case $iniwFCheck2 <> "--" And $iniwFSec <> "NULL" And $iniwFKey <> "" And $iniwFVal = ""
+				$iniwFSec = StringReplace($iniwFSec, "*NULL*", "NULL", 0, 0)
+				IniDelete($iniwFFile, $iniwFSec, $iniwFKey)
+
+			Case $iniwFCheck2 <> "--" And $iniwFSec <> "NULL" And $iniwFKey <> "" And $iniwFVal <> ""
+				$iniwFSec = StringReplace($iniwFSec, "*NULL*", "NULL", 0, 0)
+				IniWrite($iniwFFile, $iniwFSec, $iniwFKey, $iniwFVal)
+
+		EndSelect
+	Else
+		Local $iniwFError = MsgBox(64, $gapTitle, "The ""iniwrite"" function can't be called from the """ & $iniwFCaller & """ section.")
+	EndIf
+EndFunc   ;==>giniwrite
+;
+;===============================================================================================================
+; Function:		keeponly()
+;===============================================================================================================
+Func keeponly($keepoFCaller, $keepoFPath, $keepoFFilter, $keepoFType, $keepoFOrder, $keepoFParam, $keepoFNumber)
+	If $keepoFCaller = "BEFORE" Or $keepoFCaller = "AFTER" Then
+		$keepoFPath = _PathFull(FindReplaceX("MAINPROGRAM", $keepoFPath), @ScriptDir)
+		$keepoFFilter = FindReplaceX("MAINPROGRAM", $keepoFFilter)
+		$keepoFType = FindReplaceX("MAINPROGRAM", $keepoFType)
+		$keepoFOrder = FindReplaceX("MAINPROGRAM", $keepoFOrder)
+		$keepoFParam = FindReplaceX("MAINPROGRAM", $keepoFParam)
+		$keepoFNumber = FindReplaceX("MAINPROGRAM", $keepoFNumber)
+		If FileExists($keepoFPath) Then
+			If $keepoFType = "file" Then Local $keepoFFlag = 1
+			If $keepoFType = "folder" Then Local $keepoFFlag = 2
+			Local $keepoFArray = _FileListToArray($keepoFPath, $keepoFFilter, $keepoFFlag, True)
+			If IsArray($keepoFArray) Then
+				If $keepoFArray[0] > $keepoFNumber Then
+					Select
+						Case $keepoFParam = "modified"
+							_ArrayColInsert($keepoFArray, 1)
+							For $keepoFi = 1 To $keepoFArray[0][0]
+								$keepoFArray[$keepoFi][1] = FileGetTime($keepoFArray[$keepoFi][0], 0, 1)
+							Next
+
+						Case $keepoFParam = "created"
+							_ArrayColInsert($keepoFArray, 1)
+							For $keepoFi = 1 To $keepoFArray[0][0]
+								$keepoFArray[$keepoFi][1] = FileGetTime($keepoFArray[$keepoFi][0], 1, 1)
+							Next
+
+						Case $keepoFParam = "accessed"
+							_ArrayColInsert($keepoFArray, 1)
+							For $keepoFi = 1 To $keepoFArray[0][0]
+								$keepoFArray[$keepoFi][1] = FileGetTime($keepoFArray[$keepoFi][0], 2, 1)
+							Next
+
+						Case $keepoFParam = "highest"
+							_ArrayColInsert($keepoFArray, 1)
+							For $keepoFi = 1 To $keepoFArray[0][0]
+								Local $keepoFCompare[3]
+								$keepoFCompare[0] = FileGetTime($keepoFArray[$keepoFi][0], 0, 1)
+								$keepoFCompare[1] = FileGetTime($keepoFArray[$keepoFi][0], 1, 1)
+								$keepoFCompare[2] = FileGetTime($keepoFArray[$keepoFi][0], 2, 1)
+								$keepoFArray[$keepoFi][1] = _ArrayMax($keepoFCompare)
+							Next
+
+						Case $keepoFParam = "lowest"
+							_ArrayColInsert($keepoFArray, 1)
+							For $keepoFi = 1 To $keepoFArray[0][0]
+								Local $keepoFCompare[3]
+								$keepoFCompare[0] = FileGetTime($keepoFArray[$keepoFi][0], 0, 1)
+								$keepoFCompare[1] = FileGetTime($keepoFArray[$keepoFi][0], 1, 1)
+								$keepoFCompare[2] = FileGetTime($keepoFArray[$keepoFi][0], 2, 1)
+								$keepoFArray[$keepoFi][1] = _ArrayMin($keepoFCompare)
+							Next
+
+						Case $keepoFParam = "name"
+							_ArrayColInsert($keepoFArray, 1)
+							For $keepoFi = 1 To $keepoFArray[0][0]
+								Local $keepoFFileName = StringRegExp($keepoFArray[$keepoFi][0], "^.*\\(.*\..*)$", 1)
+								$keepoFArray[$keepoFi][1] = $keepoFFileName[0]
+							Next
+
+					EndSelect
+					If $keepoFOrder = "ascending" Then Local $keepoFOFlag = 0
+					If $keepoFOrder = "descending" Then Local $keepoFOFlag = 1
+					_ArraySort($keepoFArray, $keepoFOFlag, 1, 0, 1)
+					For $keepoFDeli = $keepoFNumber + 1 To $keepoFArray[0][0]
+						If $keepoFFlag = 1 Then FileDelete($keepoFArray[$keepoFDeli][0])
+						If $keepoFFlag = 2 Then DirRemove($keepoFArray[$keepoFDeli][0], 1)
+					Next
+				EndIf
+			EndIf
+		EndIf
+	Else
+		Local $keepoFError = MsgBox(64, $gapTitle, "The ""keeponly"" function can't be called from the """ & $keepoFCaller & """ section.")
+	EndIf
+EndFunc   ;==>keeponly()
+;
+;===============================================================================================================
+; Function:		killprocess()
+;===============================================================================================================
+Func killprocess($kprocFCaller, $kprocFPName)
+	If $kprocFCaller = "BEFORE" Or $kprocFCaller = "AFTER" Then
+		$kprocFPName = FindReplaceX("MAINPROGRAM", $kprocFPName)
+		Local $kprocFPList = ProcessList()
+		Local $kprocFPPID[1]
+		$kprocFPPID[0] = 0
+		For $kprocFPListi = 1 To $kprocFPList[0][0]
+			If StringRegExp($kprocFPList[$kprocFPListi][0], "^" & $kprocFPName & ".*$", 0) Then
+				_ArrayAdd($kprocFPPID, $kprocFPList[$kprocFPListi][1])
+				$kprocFPPID[0] = $kprocFPPID[0] + 1
+			EndIf
+		Next
+		For $kprocFPPIDi = 1 To $kprocFPPID[0]
+			ProcessClose($kprocFPPID[$kprocFPPIDi])
+		Next
+	Else
+		Local $kprocFError = MsgBox(64, $gapTitle, "The ""killprocess"" function can't be called from the """ & $kprocFCaller & """ section.")
+	EndIf
+EndFunc   ;==>killprocess
+;
+;===============================================================================================================
+; Function:		message()
+;===============================================================================================================
+Func message($meFCaller, $meFText, $meFCancel = "NULL")
+	If $meFCaller = "BEFORE" Or $meFCaller = "AFTER" Then
+		$meFText = FindReplaceX("MAINPROGRAM", $meFText)
+		If Not $meFText = "" Then
+			If $meFCancel = "cancellable" Then
+				Local $meFMessage = MsgBox(65, $gapTitle, $meFText)
+				If $meFMessage = 2 Then Exit
+			Else
+				Local $meFMessage = MsgBox(64, $gapTitle, $meFText)
+			EndIf
+		EndIf
+	Else
+		Local $meFError = MsgBox(64, $gapTitle, "The ""message"" function can't be called from the """ & $meFCaller & """ section.")
+	EndIf
+EndFunc   ;==>message
+;
+;===============================================================================================================
+; Function:		nowait()
+;===============================================================================================================
+Func nowait($nwFCaller, $nwFVal = 0)
+	If $nwFCaller = "BEFORE" Or $nwFCaller = "AFTER" Then
+		$nwFVal = FindReplaceX("MAINPROGRAM", $nwFVal)
+		If $nwFVal = 1 And $nwFCaller = "BEFORE" Then
+			$RunAfterSec = 0
+			$gapWait = 0
+		EndIf
+		If $nwFVal = 1 And $nwFCaller = "AFTER" Then Exit
+	Else
+		Local $nwFError = MsgBox(64, $gapTitle, "The ""nowait"" function can't be called from the """ & $nwFCaller & """ section.")
+	EndIf
+EndFunc   ;==>nowait
+;
+;===============================================================================================================
+; Function:		quit()
+;===============================================================================================================
+Func quit($quFCaller, $quFVal = 0)
+	If $quFCaller = "BEFORE" Or $quFCaller = "AFTER" Then
+		$quFVal = FindReplaceX("MAINPROGRAM", $quFVal)
+		If $quFVal = 1 Then Exit
+	Else
+		Local $quFError = MsgBox(64, $gapTitle, "The ""quit"" function can't be called from the """ & $quFCaller & """ section.")
+	EndIf
+EndFunc   ;==>quit
+;
+;===============================================================================================================
+; Function:		regdll()
+;===============================================================================================================
+Func regdll($rgdllFCaller, $rgdllFFile, $rgdllFFlag = "NULL")
+	If $rgdllFCaller = "BEFORE" Or $rgdllFCaller = "AFTER" Then
+		$rgdllFFile = _PathFull(FindReplaceX("MAINPROGRAM", $rgdllFFile), @ScriptDir)
+		$rgdllFFlag = FindReplaceX("MAINPROGRAM", $rgdllFFlag)
+		If $rgdllFFlag = "NULL" Then $rgdllFFlag = "register"
+		Local $rgdllFCheck1 = FileExists($rgdllFFile)
+		If $rgdllFCheck1 = 1 And $rgdllFFlag = "register" Then RunWait(@ComSpec & " /C REGSVR32 /S """ & $rgdllFFile & """", "", @SW_HIDE)
+		If $rgdllFCheck1 = 1 And $rgdllFFlag = "unregister" Then RunWait(@ComSpec & " /C REGSVR32 /U /S """ & $rgdllFFile & """", "", @SW_HIDE)
+	Else
+		Local $rgdllFError = MsgBox(64, $gapTitle, "The ""regdll"" function can't be called from the """ & $rgdllFCaller & """ section.")
+	EndIf
+EndFunc   ;==>regdll
+;
+;===============================================================================================================
+; Function:		regexport()
+;===============================================================================================================
+Func regexport($rgeFCaller, $rgeFKey, $rgeFFile = "NULL", $rgeFFlag = "NULL")
+	If $rgeFCaller = "BEFORE" Or $rgeFCaller = "AFTER" Then
+		$rgeFFile = FindReplaceX("MAINPROGRAM", $rgeFFile)
+		If $rgeFFile = "NULL" Then
+			$rgeFFile = "{GAPROOT}\settings.reg"
+			$rgeFFile = _PathFull(FindReplaceX("MAINPROGRAM", $rgeFFile), @ScriptDir)
+		Else
+			$rgeFFile = _PathFull($rgeFFile, @ScriptDir)
+		EndIf
+		$rgeFKey = FindReplaceX("MAINPROGRAM", $rgeFKey, 2)
+		$rgeFFlag = FindReplaceX("MAINPROGRAM", $rgeFFlag)
+		If $rgeFFlag = "NULL" Then $rgeFFlag = "x86"
+		If $rgeFFlag = "x86" Then $rgeFFlag = "/reg:32"
+		If $rgeFFlag = "x64" Then $rgeFFlag = "/reg:64"
+		If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $rgeFFlag = ""
+		Local $rgeFKoVFlag = 0
+		Local $rgeFCheck1 = StringRight($rgeFKey, 1)
+		Local $rgeFKeyExists = 0
+		Local $rgeFKeyValueExists = 0
+		If $rgeFCheck1 = "\" Then
+			$rgeFKey = StringReplace($rgeFKey, "\", "", -1, 1)
+			$rgeFKoVFlag = 1
+			If $rgeFFlag = "/reg:64" Then
+				Local $rgeFKeyTemp1 = StringSplit($rgeFKey, "\", 1)
+				Local $rgeFKeyCheck1 = StringReplace($rgeFKey, $rgeFKeyTemp1[1], $rgeFKeyTemp1[1] & "64", 1, 1)
+			Else
+				Local $rgeFKeyCheck1 = $rgeFKey
+			EndIf
+			Local $rgeFKeyCheck = RegRead($rgeFKeyCheck1, "")
+			$rgeFKeyCheck = @error
+			If $rgeFKeyCheck <= 0 Then Local $rgeFKeyExists = 1
+		Else
+			$rgeFKoVFlag = 2
+			Local $rgeFKeyTemp2 = StringSplit($rgeFKey, "\", 1)
+			Local $rgeFKeyValue = $rgeFKeyTemp2[$rgeFKeyTemp2[0]]
+			$rgeFKey = StringReplace($rgeFKey, "\" & $rgeFKeyValue, "", -1, 1)
+			If $rgeFFlag = "/reg:64" Then
+				Local $rgeFKeyCheck2 = StringReplace($rgeFKey, $rgeFKeyTemp2[1], $rgeFKeyTemp2[1] & "64", 1, 1)
+			Else
+				Local $rgeFKeyCheck2 = $rgeFKey
+			EndIf
+			Local $rgeFKeyValueCheck = RegRead($rgeFKeyCheck2, $rgeFKeyValue)
+			$rgeFKeyValueCheck = @error
+			If $rgeFKeyValueCheck = 0 Or $rgeFKeyValueCheck = -2 Then Local $rgeFKeyValueExists = 1
+		EndIf
+		If $rgeFKeyExists = 1 Or $rgeFKeyValueExists = 1 Then
+			Local $rgeFCheck2 = StringRegExp($rgeFFile, ".*\\(.*\.(?i)reg)", 0)
+			Local $rgeFCheck3 = StringRight($rgeFFile, 1)
+			If $rgeFCheck2 = 0 And $rgeFCheck3 = "\" Then $rgeFFile = $rgeFFile & "settings.reg"
+			If $rgeFCheck2 = 0 And $rgeFCheck3 <> "\" Then $rgeFFile = $rgeFFile & "\settings.reg"
+			If FileExists($rgeFFile) Then FileDelete($rgeFFile)
+			Local $rgeFFileTemp = StringRegExp($rgeFFile, "(^.*)\\", 1)
+			If FileExists($rgeFFileTemp[0]) = 0 Then DirCreate($rgeFFileTemp[0])
+			RunWait(@ComSpec & " /C REG EXPORT """ & $rgeFKey & """ """ & $rgeFFile & """ " & $rgeFFlag, "", @SW_HIDE)
+			If $rgeFKoVFlag = 2 Then
+				Local $rgeFCheck4 = StringSplit($rgeFKey, "\", 1)
+				Local $rgeFCheck5 = StringReplace($rgeFKey, $rgeFCheck4[1], "", 1, 1)
+				Local $rgeFFileOpen = FileOpen($rgeFFile, 0)
+				If $rgeFFileOpen <> -1 Then
+					Local $rgeFLinei = 1
+					Local $rgeFCount = 0
+					Local $rgeFELCount = 0
+					While 1
+						Local $rgeFFileLine = FileReadLine($rgeFFileOpen)
+						If @error = -1 Then ExitLoop
+						Select
+							Case $rgeFFileLine = ""
+								Select
+									Case $rgeFCount = 0
+										_FileWriteToLine($rgeFFile, $rgeFLinei, "", 1)
+
+									Case $rgeFCount = 1 And $rgeFELCount = 0
+										$rgeFELCount = 1
+										$rgeFLinei = $rgeFLinei + 1
+
+									Case $rgeFCount = 1 And $rgeFELCount = 1
+										_FileWriteToLine($rgeFFile, $rgeFLinei, "", 1)
+
+								EndSelect
+
+							Case StringLeft($rgeFFileLine, 1) = ";"
+								$rgeFLinei = $rgeFLinei + 1
+
+							Case StringInStr($rgeFFileLine, "REGEDIT4", 0) > 0
+								$rgeFCount = 1
+								$rgeFLinei = $rgeFLinei + 1
+
+							Case StringInStr($rgeFFileLine, "Windows Registry Editor Version 5.00", 0) > 0
+								$rgeFCount = 1
+								$rgeFLinei = $rgeFLinei + 1
+
+							Case StringLeft($rgeFFileLine, 1) = "[" And StringRight($rgeFFileLine, 1) = "]"
+								Local $rgeFCheck6 = StringSplit($rgeFFileLine, "\", 1)
+								Local $rgeFCheck7 = StringReplace(StringReplace($rgeFFileLine, $rgeFCheck6[1], "", 1, 1), "]", "", -1, 1)
+								If $rgeFCheck5 = $rgeFCheck7 Then
+									$rgeFLinei = $rgeFLinei + 1
+								Else
+									_FileWriteToLine($rgeFFile, $rgeFLinei, "", 1)
+								EndIf
+
+							Case StringInStr($rgeFFileLine, """" & $rgeFKeyValue & """" & "=") > 0
+								$rgeFLinei = $rgeFLinei + 1
+
+							Case Else
+								_FileWriteToLine($rgeFFile, $rgeFLinei, "", 1)
+
+						EndSelect
+					WEnd
+				EndIf
+				FileClose($rgeFFileOpen)
+			EndIf
+		EndIf
+	Else
+		Local $rgeFError = MsgBox(64, $gapTitle, "The ""regexport"" function can't be called from the """ & $rgeFCaller & """ section.")
+	EndIf
+EndFunc   ;==>regexport
+;
+;===============================================================================================================
+; Function:		regimport()
+;===============================================================================================================
+Func regimport($rgiFCaller, $rgiFFile = "NULL", $rgiFFlag = "NULL")
+	If $rgiFCaller = "BEFORE" Or $rgiFCaller = "AFTER" Then
+		$rgiFFile = FindReplaceX("MAINPROGRAM", $rgiFFile)
+		If $rgiFFile = "NULL" Then
+			$rgiFFile = "{GAPROOT}\settings.reg"
+			$rgiFFile = _PathFull(FindReplaceX("MAINPROGRAM", $rgiFFile), @ScriptDir)
+		Else
+			$rgiFFile = _PathFull($rgiFFile, @ScriptDir)
+		EndIf
+		Local $rgiFCheck1 = StringRegExp($rgiFFile, ".*\\(.*\.(?i)reg)", 0)
+		Local $rgiFCheck2 = StringRight($rgiFFile, 1)
+		If $rgiFCheck1 = 0 And $rgiFCheck2 = "\" Then $rgiFFile = $rgiFFile & "settings.reg"
+		If $rgiFCheck1 = 0 And $rgiFCheck2 <> "\" Then $rgiFFile = $rgiFFile & "\settings.reg"
+		$rgiFFlag = FindReplaceX("MAINPROGRAM", $rgiFFlag)
+		If $rgiFFlag = "NULL" Then $rgiFFlag = "x86"
+		If $rgiFFlag = "x86" Then $rgiFFlag = "/reg:32"
+		If $rgiFFlag = "x64" Then $rgiFFlag = "/reg:64"
+		If RegRead("HKLM\Software\Microsoft\Windows NT\CurrentVersion", "CurrentVersion") <= 5.1 Then $rgiFFlag = ""
+		Local $rgiFCheck3 = FileExists($rgiFFile)
+		If $rgiFCheck3 = 1 Then
+			RunWait(@ComSpec & " /C REG IMPORT """ & $rgiFFile & """ " & $rgiFFlag, "", @SW_HIDE)
+		EndIf
+	Else
+		Local $rgiFError = MsgBox(64, $gapTitle, "The ""regimport"" function can't be called from the """ & $rgiFCaller & """ section.")
+	EndIf
+EndFunc   ;==>regimport
+;
+;===============================================================================================================
+; Function:		regmerge()
+;===============================================================================================================
+Func regmerge($rgmFCaller, $rgmFFile1, $rgmFFile2)
+	If $rgmFCaller = "BEFORE" Or $rgmFCaller = "AFTER" Then
+		$rgmFFile1 = _PathFull(FindReplaceX("MAINPROGRAM", $rgmFFile1), @ScriptDir)
+		$rgmFFile2 = _PathFull(FindReplaceX("MAINPROGRAM", $rgmFFile2), @ScriptDir)
+		Local $rgmFCheck1 = FileExists($rgmFFile1)
+		Local $rgmFCheck2 = FileExists($rgmFFile2)
+		If $rgmFCheck1 > 0 And $rgmFCheck2 > 0 Then
+			RunWait(@ComSpec & " /C COPY """ & $rgmFFile1 & """+""" & $rgmFFile2 & """ """ & $rgmFFile1 & """", "", @SW_HIDE)
+			Local $rgmFFile1Open = FileOpen($rgmFFile1, 0)
+			If $rgmFFile1Open <> -1 Then
+				Local $rgmFLinei = 0
+				Local $rgmFCount = 0
+				While 1
+					$rgmFLinei = $rgmFLinei + 1
+					Local $rgmFFile1Line = FileReadLine($rgmFFile1Open)
+					If @error = -1 Then ExitLoop
+					Local $rgmFStringCheck1 = StringInStr($rgmFFile1Line, "REGEDIT4", 0)
+					Local $rgmFStringCheck2 = StringInStr($rgmFFile1Line, "Windows Registry Editor Version 5.00", 0)
+					If $rgmFStringCheck1 > 0 Or $rgmFStringCheck2 > 0 Then
+						$rgmFCount = $rgmFCount + 1
+						If $rgmFCount > 1 Then
+							FileClose($rgmFFile1Open)
+							_FileWriteToLine($rgmFFile1, $rgmFLinei, "", 1)
+							ExitLoop
+						EndIf
+					EndIf
+				WEnd
+			EndIf
+		EndIf
+	Else
+		Local $rgmFError = MsgBox(64, $gapTitle, "The ""regmerge"" function can't be called from the """ & $rgmFCaller & """ section.")
+	EndIf
+EndFunc   ;==>regmerge
+;
+;===============================================================================================================
+; Function:		replace()
+;===============================================================================================================
+Func replace($repFCaller, $repFFile, $repFStringF, $repFStringR)
+	If $repFCaller = "BEFORE" Or $repFCaller = "AFTER" Then
+		$repFFile = _PathFull(FindReplaceX("MAINPROGRAM", $repFFile), @ScriptDir)
+		$repFStringF = FindReplaceX("MAINPROGRAM", $repFStringF)
+		$repFStringR = FindReplaceX("MAINPROGRAM", $repFStringR)
+		Local $repFCheck1 = FileExists($repFFile)
+		If $repFCheck1 > 0 Then
+			_ReplaceStringInFile($repFFile, $repFStringF, $repFStringR, 0, 1)
+		EndIf
+	Else
+		Local $repFError = MsgBox(64, $gapTitle, "The ""replace"" function can't be called from the """ & $repFCaller & """ section.")
+	EndIf
+EndFunc   ;==>replace
+;
+;===============================================================================================================
+; Function:		replaceline()
+;===============================================================================================================
+Func replaceline($rlFCaller, $rlFFile, $rlFStringF, $rlFStringR)
+	If $rlFCaller = "BEFORE" Or $rlFCaller = "AFTER" Then
+		$rlFFile = _PathFull(FindReplaceX("MAINPROGRAM", $rlFFile), @ScriptDir)
+		$rlFStringF = FindReplaceX("MAINPROGRAM", $rlFStringF)
+		$rlFStringR = FindReplaceX("MAINPROGRAM", $rlFStringR)
+		Local $rlFCheck1 = FileExists($rlFFile)
+		If $rlFCheck1 > 0 Then
+			Local $rlFFileOpen = FileOpen($rlFFile, 0)
+			If $rlFFileOpen <> -1 Then
+				Local $rlFLinei = 0
+				While 1
+					$rlFLinei = $rlFLinei + 1
+					Local $rlFFileLine = FileReadLine($rlFFileOpen)
+					If @error = -1 Then ExitLoop
+					Local $rlFStringCheck = StringInStr($rlFFileLine, $rlFStringF, 0)
+					If $rlFStringCheck > 0 Then
+						FileClose($rlFFileOpen)
+						_FileWriteToLine($rlFFile, $rlFLinei, $rlFStringR, 1)
+						ExitLoop
+					EndIf
+				WEnd
+			EndIf
+		EndIf
+	Else
+		Local $rlFError = MsgBox(64, $gapTitle, "The ""replaceline"" function can't be called from the """ & $rlFCaller & """ section.")
+	EndIf
+EndFunc   ;==>replaceline
+;
+;===============================================================================================================
+; Function:		restore()
+;===============================================================================================================
+Func restore($reFCaller, $reFVal = 0)
+	If $reFCaller = "AFTER" Then
+		$reFVal = FindReplaceX("MAINPROGRAM", $reFVal)
+		If $reFVal = 1 Then
+			For $aai = 1 To $AfterSecArray[0][0]
+				If $AfterSecArray[$aai][0] <> "DONE!" And $AfterSecArray[$aai][2] = "PROG" Then
+					Local $ParamAArray = StringSplit($AfterSecArray[$aai][1], " :: ", 1)
+					Local $CallArgAArray[$ParamAArray[0] + 1]
+					$CallArgAArray[0] = "CallArgArray"
+					For $paai = 1 To $ParamAArray[0]
+						$CallArgAArray[$paai] = $ParamAArray[$paai]
+					Next
+					Call($AfterSecArray[$aai][0], $CallArgAArray)
+					$AfterSecArray[$aai][0] = "DONE!"
+					$AfterSecArray[$aai][1] = "DONE!"
+				EndIf
+			Next
+		EndIf
+	Else
+		Local $reFError = MsgBox(64, $gapTitle, "The ""restore"" function can't be called from the """ & $reFCaller & """ section.")
+	EndIf
+EndFunc   ;==>restore
+;
+;===============================================================================================================
+; Function:		grun()
+;===============================================================================================================
+Func grun($runFCaller, $runFApp, $runFWait = "NULL", $runFCmdLine = "NULL", $runFWorkDir = "NULL")
+	If $runFCaller = "BEFORE" Or $runFCaller = "AFTER" Then
+		$runFApp = _PathFull(FindReplaceX("MAINPROGRAM", $runFApp), @ScriptDir)
+		$runFWait = FindReplaceX("MAINPROGRAM", $runFWait)
+		$runFCmdLine = FindReplaceX("MAINPROGRAM", $runFCmdLine)
+		If $runFCmdLine = "NULL" Then $runFCmdLine = ""
+		$runFWorkDir = FindReplaceX("MAINPROGRAM", $runFWorkDir)
+		If $runFWorkDir = "NULL" Then
+			$runFWorkDir = "{GAPROOT}"
+			$runFWorkDir = _PathFull(FindReplaceX("MAINPROGRAM", $runFWorkDir), @ScriptDir)
+		Else
+			$runFWorkDir = _PathFull($runFWorkDir, @ScriptDir)
+		EndIf
+		Local $runFCheck1 = FileExists($runFApp)
+		If $runFCheck1 = 1 Then
+			If $runFWait = "wait" Then
+				RunWait($runFApp & " " & $runFCmdLine, $runFWorkDir, @SW_SHOW)
+			Else
+				Run($runFApp & " " & $runFCmdLine, $runFWorkDir, @SW_SHOW)
+			EndIf
+		EndIf
+	Else
+		Local $runFError = MsgBox(64, $gapTitle, "The ""run"" function can't be called from the """ & $runFCaller & """ section.")
+	EndIf
+EndFunc   ;==>grun
+;
+;===============================================================================================================
+; Function:		service()
+;===============================================================================================================
+Func service($serviceFCaller, $serviceFName, $serviceFFlag, $serviceFFile = "NULL", $serviceFType = "NULL")
+	If $serviceFCaller = "BEFORE" Or $serviceFCaller = "AFTER" Then
+		$serviceFName = FindReplaceX("MAINPROGRAM", $serviceFName)
+		$serviceFFlag = FindReplaceX("MAINPROGRAM", $serviceFFlag)
+		$serviceFFile = FindReplaceX("MAINPROGRAM", $serviceFFile)
+		$serviceFType = FindReplaceX("MAINPROGRAM", $serviceFType)
+		Select
+			Case $serviceFType = "NULL"
+				$serviceFType = "own"
+
+			Case $serviceFType = "interact own"
+				$serviceFType = "interact"" type= ""own"
+
+			Case $serviceFType = "interact share"
+				$serviceFType = "interact"" type= ""share"
+
+		EndSelect
+		Select
+			Case $serviceFFlag = "create" And FileExists($serviceFFile)
+				RunWait(@ComSpec & " /C SC CREATE """ & $serviceFName & """ binPath= """ & $serviceFFile & """ type= """ & $serviceFType & """", "", @SW_HIDE)
+
+			Case $serviceFFlag = "delete"
+				RunWait(@ComSpec & " /C SC DELETE """ & $serviceFName & """", "", @SW_HIDE)
+
+			Case $serviceFFlag = "start"
+				RunWait(@ComSpec & " /C SC START """ & $serviceFName & """", "", @SW_HIDE)
+
+			Case $serviceFFlag = "stop"
+				RunWait(@ComSpec & " /C SC STOP """ & $serviceFName & """", "", @SW_HIDE)
+
+		EndSelect
+	Else
+		Local $serviceFError = MsgBox(64, $gapTitle, "The ""service"" function can't be called from the """ & $serviceFCaller & """ section.")
+	EndIf
+EndFunc   ;==>service
+;
+;===============================================================================================================
+; Function:		gstringreplace()
+;===============================================================================================================
+Func gstringreplace($strrFCaller, $strrFText, $strrFStringF, $strrFStringR, $strrFVarStore)
+	If $strrFCaller = "BEFORE" Or $strrFCaller = "AFTER" Then
+		$strrFText = FindReplaceX("MAINPROGRAM", $strrFText)
+		$strrFStringF = FindReplaceX("MAINPROGRAM", $strrFStringF)
+		$strrFStringR = FindReplaceX("MAINPROGRAM", $strrFStringR)
+		If $strrFStringR = "NULL" Then $strrFStringR = ""
+		$strrFStringR = StringReplace($strrFStringR, "*NULL*", "NULL", 0, 0)
+		Local $strrFReturn = StringReplace($strrFText, $strrFStringF, $strrFStringR, 0, 0)
+		uservar($strrFCaller, $strrFVarStore, $strrFReturn)
+	Else
+		Local $strrFError = MsgBox(64, $gapTitle, "The ""stringreplace"" function can't be called from the """ & $strrFCaller & """ section.")
+	EndIf
+EndFunc   ;==>gstringreplace
+;
+;===============================================================================================================
+; Function:		symlink()
+;===============================================================================================================
+Func symlink($slFCaller, $slFLink, $slFTarget, $slFFlag = "Create", $slFDir = 1)
+	If $slFCaller = "BEFORE" Then
+		Select
+			Case $slFFlag = "Create"
+				$slFLink = _PathFull(FindReplaceX("MAINPROGRAM", $slFLink), @ScriptDir)
+				$slFTarget = _PathFull(FindReplaceX("MAINPROGRAM", $slFTarget), @ScriptDir)
+				Local $slFCheck1 = FileExists($slFTarget)
+				Local $slFCheck2 = StringInStr(DriveGetFileSystem(StringLeft($slFLink, 1) & ":\"), "NTFS", 1)
+				Local $slFCheck3 = StringInStr(DriveGetFileSystem(StringLeft($slFTarget, 1) & ":\"), "NTFS", 1)
+				Local $slFCheck4 = StringInStr(FileGetAttrib($slFTarget), "D", 1)
+				If $slFCheck4 > 0 Then $slFCheck4 = 1
+				Local $slFCheck5 = IsAdmin()
+				If $slFCheck1 > 0 And $slFCheck2 > 0 And $slFCheck3 > 0 And $slFCheck5 > 0 Then
+					Local $slFLinkTemp = StringRegExp($slFLink, "(^.*)\\", 1)
+					If FileExists($slFLinkTemp[0]) = 0 Then DirCreate($slFLinkTemp[0])
+					DllCall("kernel32.dll", "boolean", "CreateSymbolicLinkW", "wstr", $slFLink, "wstr", $slFTarget, "dword", $slFCheck4)
+					Local $slFArray[1]
+					_ArrayColInsert($slFArray, 1)
+					_ArrayColInsert($slFArray, 2)
+					$slFArray[0][0] = "symlink"
+					$slFArray[0][1] = "BEFORE :: " & $slFLink & " :: " & $slFTarget & " :: Remove :: " & $slFCheck4
+					$slFArray[0][2] = "PROG"
+					For $slFArrayi = 0 To UBound($slFArray) - 1
+						_ArrayInsert($AfterSecArray, _ArraySearch($AfterSecArray, "USER", 0, 0, 0, 0, 1, 2), _ArrayExtract($slFArray, $slFArrayi, $slFArrayi))
+					Next
+					$AfterSecArray[0][0] = $AfterSecArray[0][0] + 1
+				EndIf
+
+			Case $slFFlag = "Remove"
+				If $slFDir = 0 Then DllCall("kernel32.dll", "bool", "DeleteFileW", "wstr", $slFLink)
+				If $slFDir = 1 Then DllCall("kernel32.dll", "bool", "RemoveDirectoryW", "wstr", $slFLink)
+
+		EndSelect
+	Else
+		Local $slFError = MsgBox(64, $gapTitle, "The ""symlink"" function can't be called from the """ & $slFCaller & """ section.")
+	EndIf
+EndFunc   ;==>symlink
+;
+;===============================================================================================================
+; Function:		systemrefresh()
+;===============================================================================================================
+Func systemrefresh($srFCaller, $srFVal = 0)
+	If $srFCaller = "BEFORE" Or $srFCaller = "AFTER" Then
+		$srFVal = FindReplaceX("MAINPROGRAM", $srFVal)
+		If $srFVal = 1 Then
+			DllCall("shell32.dll", "none", "SHChangeNotify", "long", 0x8000000, "uint", BitOR(0x0, 0x1000), "ptr", 0, "ptr", 0)
+		EndIf
+	Else
+		Local $srFError = MsgBox(64, $gapTitle, "The ""systemrefresh"" function can't be called from the """ & $srFCaller & """ section.")
+	EndIf
+EndFunc   ;==>systemrefresh
+;
+;===============================================================================================================
+; Function:		uservar()
+;===============================================================================================================
+Func uservar($uvFCaller, $uvFVar, $uvFVal)
+	If $uvFCaller = "BEFORE" Or $uvFCaller = "AFTER"  Then
+		Local $uvFCheck1 = _ArraySearch($FuncArray, $uvFVar)
+		Local $MacroVar = "GAPROOT,EXEPATH,APPEXE,DRIVE,WORKDIR,LINEBREAK,COMMANDLINE,PARAMETERS,JAVAEXE"
+		Local $uvFCheck2 = StringInStr($MacroVar, $uvFVar)
+		If $uvFCheck1 = -1 And $uvFCheck2 = 0 Then
+			$uvFVal = FindReplaceX("MAINPROGRAM", $uvFVal)
+			addvar("MAINPROGRAM", $uvFVar, $uvFVal, "V")
+		Else
+			MsgBox(64, $gapTitle, "The variable name """ & $uvFVar & """ can't be used. Please, choose another name for it.")
+		EndIf
+	Else
+		Local $uvFError = MsgBox(64, $gapTitle, "The ""uservar"" function can't be called from the """ & $uvFCaller & """ section.")
+	EndIf
+EndFunc   ;==>uservar
+;
+;===============================================================================================================
+; Function:		FindReplaceX()
+;===============================================================================================================
+Func FindReplaceX($frXFCaller, $frXFInput, $frXFFlag = 1)
+	If Not $frXFCaller = "MAINPROGRAM" Then
+		Local $frXFError = MsgBox(64, $gapTitle, "The ""FindReplaceX"" function can't be called from the """ & $frXFCaller & """ section.")
+	Else
+		Select
+			Case Not StringRegExp($frXFInput, "(?i)(\!@@\!.*?\!@@\!)", 3) = 1
+				Local $frXFDCheck = StringRegExp($frXFInput, "(?i)(\!@@\!.*?\!@@\!)", 3)
+				Local $frXFPasswordBox = InputBox("Please, enter the password to decrypt data:", "Password:", "", "*", 360, 125)
+				If @error = 1 Then Exit
+				Local $frXFDecrypted = StringEncrypt("Decrypt", $frXFDCheck[0], $frXFPasswordBox)
+				$frXFInput = StringReplace($frXFInput, $frXFDCheck[0], $frXFDecrypted, 1, 1)
+				$frXFInput = FindReplaceX("MAINPROGRAM", $frXFInput)
+
+			Case Not StringRegExp($frXFInput, "(?:(?<!<)(?:<<)*)\{\{(.*?(?:(?<!<)(?:<<)*))\}\}", 3) = 1
+				Local $frXFDVCheck = StringRegExp($frXFInput, "(?:(?<!<)(?:<<)*)\{\{(.*?(?:(?<!<)(?:<<)*))\}\}", 3)
+				Local $frXFDVFind1 = _ArraySearch($VarArray, StringReplace(StringReplace(StringReplace($frXFDVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1), 0, 0, 1)
+				If $frXFDVFind1 = -1 Then
+					Local $frXFDVFind2 = _ArraySearch($FuncArray, StringReplace(StringReplace(StringReplace($frXFDVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1), 0, 0, 1)
+					If $frXFDVFind2 = -1 Then
+						Local $frXFError = MsgBox(64, $gapTitle, "The """ & StringReplace(StringReplace(StringReplace($frXFDVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1) & """ variable isn't defined and can't be used.")
+						Return $frXFInput
+					Else
+						$frXFInput = StringReplace($frXFInput, "{{" & $frXFDVCheck[0] & "}}", StringReplace(Call($FuncArray[$frXFDVFind2][1]), "\", "\\", 0, 1), 1, 1)
+					EndIf
+				Else
+					$frXFInput = StringReplace($frXFInput, "{{" & $frXFDVCheck[0] & "}}", StringReplace($VarArray[$frXFDVFind1][1], "\", "\\", 0, 1), 1, 1)
+				EndIf
+				$frXFInput = FindReplaceX("MAINPROGRAM", $frXFInput)
+
+			Case Not StringRegExp($frXFInput, "(?:(?<!<)(?:<<)*)\{(.*?(?:(?<!<)(?:<<)*))\}", 3) = 1
+				Local $frXFSVCheck = StringRegExp($frXFInput, "(?:(?<!<)(?:<<)*)\{(.*?(?:(?<!<)(?:<<)*))\}", 3)
+				Local $frXFSVFind1 = _ArraySearch($VarArray, StringReplace(StringReplace(StringReplace($frXFSVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1), 0, 0, 1)
+				If $frXFSVFind1 = -1 Then
+					MsgBox(48, "TESTE", $frXFSVCheck[0])
+					MsgBox(48, "TESTE", StringReplace(StringReplace(StringReplace($frXFSVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1))
+					Local $frXFSVFind2 = _ArraySearch($FuncArray, StringReplace(StringReplace(StringReplace($frXFSVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1), 0, 0, 1)
+					If $frXFSVFind2 = -1 Then
+						Local $frXFError = MsgBox(64, $gapTitle, "The """ & StringReplace(StringReplace(StringReplace($frXFSVCheck[0], "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1) & """ variable isn't defined and can't be used.")
+						Return $frXFInput
+					Else
+						$frXFInput = StringReplace($frXFInput, "{" & $frXFSVCheck[0] & "}", Call($FuncArray[$frXFSVFind2][1]), 1, 1)
+					EndIf
+				Else
+					$frXFInput = StringReplace($frXFInput, "{" & $frXFSVCheck[0] & "}", $VarArray[$frXFSVFind1][1], 1, 1)
+				EndIf
+				$frXFInput = FindReplaceX("MAINPROGRAM", $frXFInput)
+		EndSelect
+	EndIf
+	For $frXFSFi = 1 To $ShellFArray[0][0]
+		$frXFInput = StringReplace($frXFInput, "%" & $ShellFArray[$frXFSFi][0] & "%", $ShellFArray[$frXFSFi][1], 0, 0)
+	Next
+	If $frXFFlag = 2 Then
+		Local $frXFRegCheck = StringSplit($frXFInput, "\", 1)
+		If StringRight($frXFRegCheck[1], 2) = "64" Then $frXFInput = StringReplace($frXFInput, $frXFRegCheck[1], StringTrimRight($frXFRegCheck[1], 2), 1, 1)
+	EndIf
+	Return StringReplace(StringReplace(StringReplace($frXFInput, "<{", "{", 0, 1), "<}", "}", 0, 1), "<<", "<", 0, 1)
+EndFunc   ;==>FindReplaceX
+;
+;===============================================================================================================
+; Function:		addvar()
+;===============================================================================================================
+Func addvar($avFCaller, $avFP, $avFV, $avFC)
+	If Not $avFCaller = "MAINPROGRAM" Then
+		Local $avFError = MsgBox(64, $gapTitle, "The ""addvar"" function can't be called from the """ & $avFCaller & """ section.")
+	Else
+		Select
+			Case $avFC = "V"
+				Local $FindavF = _ArraySearch($VarArray, $avFP, 0, 0, 1)
+				If $FindavF = -1 Then
+					$VarArray[0][0] = $VarArray[0][0] + 1
+					Local $VarArrayTemp[1]
+					_ArrayColInsert($VarArrayTemp, 0)
+					$VarArrayTemp[0][0] = $avFP
+					$VarArrayTemp[0][1] = $avFV
+					_ArrayAdd($VarArray, $VarArrayTemp, 0)
+				Else
+					$VarArray[$FindavF][1] = $avFV
+				EndIf
+
+			Case $avFC = "F"
+				Local $FindavF = _ArraySearch($FuncArray, $avFP, 0, 0, 1)
+				If $FindavF = -1 Then
+					$FuncArray[0][0] = $FuncArray[0][0] + 1
+					Local $FuncArrayTemp[1]
+					_ArrayColInsert($FuncArrayTemp, 0)
+					$FuncArrayTemp[0][0] = $avFP
+					$FuncArrayTemp[0][1] = $avFV
+					_ArrayAdd($FuncArray, $FuncArrayTemp, 0)
+				Else
+					$FuncArray[$FindavF][1] = $avFV
+				EndIf
+
+			Case Else
+				Local $avFError = MsgBox(64, $gapTitle, "The ""addvar"" function was used with wrong parameters.")
+		EndSelect
+	EndIf
+EndFunc   ;==>addvar
+;
+;===============================================================================================================
+; Function:		userdir() - {USERDIR}
+;===============================================================================================================
+Func userdir()
+	Local $userdirF = FileSelectFolder("Please, select a directory for {USERDIR} macro:", "%HomeDrive%", 1)
+	Return $userdirF
+EndFunc   ;==>userdir
+;
+;===============================================================================================================
+; Function:		userfile() - {USERFILE}
+;===============================================================================================================
+Func userfile()
+	Local $userfileF = FileOpenDialog("Please, select a file for {USERFILE} macro:", "%HomeDrive%", "All (*.*)")
+	Return $userfileF
+EndFunc   ;==>userfile
+;
+;===============================================================================================================
+; Function:		usertext() - {USERTEXT}
+;===============================================================================================================
+Func usertext()
+	Local $usertextF = InputBox("Please, define an input text for {USERTEXT} macro:", "Input text:", "", "", 360, 125)
+	Return $usertextF
+EndFunc   ;==>usertext
+;
+;===============================================================================================================
+; Function:		day2() - {d}
+;===============================================================================================================
+Func day2()
+	Local $day2F = @MDAY
+	Return $day2F
+EndFunc   ;==>day2
+;
+;===============================================================================================================
+; Function:		day1() - {j}
+;===============================================================================================================
+Func day1()
+	Local $day1F = StringLeft(@MDAY, 1)
+	If $day1F = 0 Then
+		$day1F = StringRight(@MDAY, 1)
+	Else
+		$day1F = @MDAY
+	EndIf
+	Return $day1F
+EndFunc   ;==>day1
+;
+;===============================================================================================================
+; Function:		mon2() - {m}
+;===============================================================================================================
+Func mon2()
+	Local $mon2F = @MON
+	Return $mon2F
+EndFunc   ;==>mon2
+;
+;===============================================================================================================
+; Function:		mon1() - {n}
+;===============================================================================================================
+Func mon1()
+	Local $mon1F = StringLeft(@MON, 1)
+	If $mon1F = 0 Then
+		$mon1F = StringRight(@MON, 1)
+	Else
+		$mon1F = @MON
+	EndIf
+	Return $mon1F
+EndFunc   ;==>mon1
+;
+;===============================================================================================================
+; Function:		year4() - {Y}
+;===============================================================================================================
+Func year4()
+	Local $year4F = @YEAR
+	Return $year4F
+EndFunc   ;==>year4
+;
+;===============================================================================================================
+; Function:		year2() - {y}
+;===============================================================================================================
+Func year2()
+	Local $year2F = StringRight(@YEAR, 2)
+	Return $year2F
+EndFunc   ;==>year2
+;
+;===============================================================================================================
+; Function:		hour242() - {H}
+;===============================================================================================================
+Func hour242()
+	Local $hour242F = @HOUR
+	Return $hour242F
+EndFunc   ;==>hour242
+;
+;===============================================================================================================
+; Function:		hour241() - {G}
+;===============================================================================================================
+Func hour241()
+	Local $hour241F = StringLeft(@HOUR, 1)
+	If $hour241F = 0 Then
+		$hour241F = StringRight(@HOUR, 1)
+	Else
+		$hour241F = @HOUR
+	EndIf
+	Return $hour241F
+EndFunc   ;==>hour241
+;
+;===============================================================================================================
+; Function:		hour122() - {h}
+;===============================================================================================================
+Func hour122()
+	Local $hour122F = StringFormat("%02s", hour121())
+	Return $hour122F
+EndFunc   ;==>hour122
+;
+;===============================================================================================================
+; Function:		hour121() - {g}
+;===============================================================================================================
+Func hour121()
+	Local $hour121F = StringLeft(@HOUR, 1)
+	If $hour121F = 0 Then
+		$hour121F = StringRight(@HOUR, 1)
+	Else
+		$hour121F = @HOUR
+	EndIf
+	If $hour121F = 0 Then $hour121F = 12
+	If $hour121F >= 13 And $hour121F <= 23 Then $hour121F = $hour121F - 12
+	Return $hour121F
+EndFunc   ;==>hour121
+;
+;===============================================================================================================
+; Function:		min2() - {i}
+;===============================================================================================================
+Func min2()
+	Local $min2F = @MIN
+	Return $min2F
+EndFunc   ;==>min2
+;
+;===============================================================================================================
+; Function:		sec2() - {s}
+;===============================================================================================================
+Func sec2()
+	Local $sec2F = @SEC
+	Return $sec2F
+EndFunc   ;==>sec2
+;
+;===============================================================================================================
+; Function:		sEPOCH() - {U}
+;===============================================================================================================
+Func sEPOCH()
+	Local $sEPOCHF = _DateDiff("s", "1970/01/01 00:00:00", _NowCalc())
+	Return $sEPOCHF
+EndFunc   ;==>sEPOCH
+;
+;===============================================================================================================
+; Function:		langcode() - {LANGCODE}
+;===============================================================================================================
+Func langcode()
+	Local $langcodeF = @OSLang
+	Return $langcodeF
+EndFunc   ;==>langcode
+;
+;===============================================================================================================
+; Function:		langX()
+;===============================================================================================================
+Func langX()
+	Local $LanguageTable = "4,zh-CHS,Chinese (Simplified) - China,1025,ar-SA,Arabic - Saudi Arabia,1026,bg-BG,Bulgarian - Bulgaria,1027,ca-ES,Catalan - Spain," & _
+	"1028,zh-TW,Chinese (Traditional) - Taiwan,1029,cs-CZ,Czech - Czech Republic,1030,da-DK,Danish - Denmark,1031,de-DE,German - Germany,1032,el-GR,Greek - Greece," & _
+	"1033,en-US,English - United States,1034,es-ES_tradnl,Spanish - Spain,1035,fi-FI,Finnish - Finland,1036,fr-FR,French - France,1037,he-IL,Hebrew - Israel," & _
+	"1038,hu-HU,Hungarian - Hungary,1039,is-IS,Icelandic - Iceland,1040,it-IT,Italian - Italy,1041,ja-JP,Japanese - Japan,1042,ko-KR,Korean - Korea," & _
+	"1043,nl-NL,Dutch - Netherlands,1044,nb-NO,Norwegian (Bokm�l) - Norway,1045,pl-PL,Polish - Poland,1046,pt-BR,Portuguese - Brazil,1047,rm-CH,Romansh - Switzerland," & _
+	"1048,ro-RO,Romanian - Romania,1049,ru-RU,Russian - Russia,1050,hr-HR,Croatian - Croatia,1051,sk-SK,Slovak - Slovakia,1052,sq-AL,Albanian - Albania,1053,sv-SE,Swedish - Sweden," & _
+	"1054,th-TH,Thai - Thailand,1055,tr-TR,Turkish - Turkey,1056,ur-PK,Urdu - Pakistan,1057,id-ID,Indonesian - Indonesia,1058,uk-UA,Ukrainian - Ukraine,1059,be-BY,Belarusian - Belarus," & _
+	"1060,sl-SI,Slovenian - Slovenia,1061,et-EE,Estonian - Estonia,1062,lv-LV,Latvian - Latvia,1063,lt-LT,Lithuanian - Lithuanian,1064,tg-Cyrl-TJ,Tajik (Cyrillic) - Tajikistan," & _
+	"1065,fa-IR,Persian - Iran,1066,vi-VN,Vietnamese - Vietnam,1067,hy-AM,Armenian - Armenia,1068,az-Latn-AZ,Azeri (Latin) - Azerbaijan,1069,eu-ES,Basque - Basque,1070,hsb-DE,Upper Sorbian - Germany," & _
+	"1071,mk-MK,Macedonian - Macedonia,1074,tn-ZA,Setswana / Tswana - South Africa,1076,xh-ZA,isiXhosa - South Africa,1077,zu-ZA,isiZulu - South Africa,1078,af-ZA,Afrikaans - South Africa," & _
+	"1079,ka-GE,Georgian - Georgia,1080,fo-FO,Faroese - Faroe Islands,1081,hi-IN,Hindi - India,1082,mt-MT,Maltese - Malta,1083,se-NO,Sami (Northern) - Norway,1086,ms-MY,Malay - Malaysia," & _
+	"1087,kk-KZ,Kazakh - Kazakhstan,1088,ky-KG,Kyrgyz - Kyrgyzstan,1089,sw-KE,Swahili - Kenya,1090,tk-TM,Turkmen - Turkmenistan,1091,uz-Latn-UZ,Uzbek (Latin) - Uzbekistan," & _
+	"1092,tt-RU,Tatar - Russia,1093,bn-IN,Bangla - Bangladesh,1094,pa-IN,Punjabi - India,1095,gu-IN,Gujarati - India,1096,or-IN,Oriya - India,1097,ta-IN,Tamil - India,1098,te-IN,Telugu - India," & _
+	"1099,kn-IN,Kannada - India,1100,ml-IN,Malayalam - India,1101,as-IN,Assamese - India,1102,mr-IN,Marathi - India,1103,sa-IN,Sanskrit - India,1104,mn-MN,Mongolian (Cyrillic) - Mongolia," & _
+	"1105,bo-CN,Tibetan - China,1106,cy-GB,Welsh - United Kingdom,1107,km-KH,Khmer - Cambodia,1108,lo-LA,Lao - Lao PDR,1110,gl-ES,Galician - Spain,1111,kok-IN,Konkani - India," & _
+	"1114,syr-SY,Syriac - Syria,1115,si-LK,Sinhala - Sri Lanka,1116,chr-Cher-US,Cherokee - Cherokee,1117,iu-Cans-CA,Inuktitut (Canadian_Syllabics) - Canada,1118,am-ET,Amharic - Ethiopia," & _
+	"1121,ne-NP,Nepali - Nepal,1122,fy-NL,Frisian - Netherlands,1123,ps-AF,Pashto - Afghanistan,1124,fil-PH,Filipino - Philippines,1125,dv-MV,Divehi - Maldives,1128,ha-Latn-NG,Hausa - Nigeria," & _
+	"1130,yo-NG,Yoruba - Nigeria,1131,quz-BO,Quechua - Bolivia,1132,nso-ZA,Sesotho sa Leboa - South Africa,1133,ba-RU,Bashkir - Russia,1134,lb-LU,Luxembourgish - Luxembourg,1135,kl-GL,Greenlandic - Greenland," & _
+	"1136,ig-NG,Igbo - Nigeria,1139,ti-ET,Tigrinya - Ethiopia,1141,haw-US,Hawiian - United States,1144,ii-CN,Yi - China,1146,arn-CL,Mapudungun - Chile,1148,moh-CA,Mohawk - Canada,1150,br-FR,Breton - France," & _
+	"1152,ug-CN,Uyghur - China,1153,mi-NZ,Maori - New Zealand,1154,oc-FR,Occitan - France,1155,co-FR,Corsican - France,1156,gsw-FR,Alsatian - France,1157,sah-RU,Sakha - Russia,1158,qut-GT,K'iche - Guatemala," & _
+	"1159,rw-RW,Kinyarwanda - Rwanda,1160,wo-SN,Wolof - Senegal,1164,prs-AF,Dari - Afghanistan,1169,gd-GB,Scottish Gaelic - United Kingdom,1170,ku-Arab-IQ,Central Kurdish - Iraq,2049,ar-IQ,Arabic - Iraq," & _
+	"2051,ca-ES-valencia,Valencian - Valencia,2052,zh-CN,Chinese (Simplified) - China,2055,de-CH,German - Switzerland,2057,en-GB,English - United Kingdom,2058,es-MX,Spanish - Mexico,2060,fr-BE,French - Belgium," & _
+	"2064,it-CH,Italian - Switzerland,2067,nl-BE,Dutch - Belgium,2068,nn-NO,Norwegian (Nynorsk) - Norway,2070,pt-PT,Portuguese - Portugal,2074,sr-Latn-CS,Serbian (Latin) - Serbia and Montenegro," & _
+	"2077,sv-FI,Swedish - Finland,2080,ur-IN,Urdu - (reserved),2092,az-Cyrl-AZ,Azeri (Cyrillic) - Azerbaijan,2094,dsb-DE,Lower Sorbian - Germany,2098,tn-BW,Setswana / Tswana - Botswana," & _
+	"2107,se-SE,Sami (Northern) - Sweden,2108,ga-IE,Irish - Ireland,2110,ms-BN,Malay - Brunei Darassalam,2115,uz-Cyrl-UZ,Uzbek (Cyrillic) - Uzbekistan,2117,bn-BD,Bangla - Bangladesh," & _
+	"2118,pa-Arab-PK,Punjabi - Pakistan,2121,ta-LK,Tamil - Sri Lanka,2128,mn-Mong-CN,Mongolian (Mong) - Mongolia,2137,sd-Arab-PK,Sindhi - Pakistan,2141,iu-Latn-CA,Inuktitut (Latin) - Canada," & _
+	"2143,tzm-Latn-DZ,Tamazight (Latin) - Algeria,2151,ff-Latn-SN,Pular - Senegal,2155,quz-EC,Quechua - Ecuador,2163,ti-ER,(reserved) - (reserved),2163,ti-ER,Tigrinya - Eritrea,3073,ar-EG,Arabic - Egypt," & _
+	"3076,zh-HK,Chinese - Hong Kong SAR,3079,de-AT,German - Austria,3081,en-AU,English - Australia,3082,es-ES,Spanish - Spain,3084,fr-CA,French - Canada,3098,sr-Cyrl-CS,Serbian (Cyrillic) - Serbia and Montenegro," & _
+	"3131,se-FI,Sami (Northern) - Finland,3179,quz-PE,Quechua - Peru,4097,ar-LY,Arabic - Libya,4100,zh-SG,Chinese - Singapore,4103,de-LU,German - Luxembourg,4105,en-CA,English - Canada,4106,es-GT,Spanish - Guatemala," & _
+	"4108,fr-CH,French - Switzerland,4122,hr-BA,Croatian (Latin) - Bosnia and Herzegovina,4155,smj-NO,Sami (Lule) - Norway,4191,tzm-Tfng-MA,Central Atlas Tamazight (Tifinagh) - Morocco," & _
+	"5121,ar-DZ,Arabic - Algeria,5124,zh-MO,Chinese - Macao SAR,5127,de-LI,German - Liechtenstein,5129,en-NZ,English - New Zealand,5130,es-CR,Spanish - Costa Rica,5132,fr-LU,French - Luxembourg," & _
+	"5146,bs-Latn-BA,Bosnian (Latin) - Bosnia and Herzegovina,5179,smj-SE,Sami (Lule) - Sweden,6145,ar-MA,Arabic - Morocco,6153,en-IE,English - Ireland,6154,es-PA,Spanish - Panama,6156,fr-MC,French - Monaco," & _
+	"6170,sr-Latn-BA,Serbian (Latin) - Bosnia and Herzegovina,6203,sma-NO,Sami (Southern) - Norway,7169,ar-TN,Arabic - Tunisia,7177,en-ZA,English - South Africa,7178,es-DO,Spanish - Dominican Republic," & _
+	"7194,sr-Cyrl-BA,Serbian (Cyrillic) - Bosnia and Herzegovina,7227,sma-SE,Sami (Southern) - Sweden,8193,ar-OM,Arabic - Oman,8201,en-JM,English - Jamaica,8202,es-VE,Spanish - Venezuela," & _
+	"8218,bs-Cyrl-BA,Bosnian (Cyrillic) - Bosnia and Herzegovina,8251,sms-FI,Sami (Skolt) - Finland,9217,ar-YE,Arabic - Yemen,9225,en-029,English - Caribbean,9226,es-CO,Spanish - Colombia," & _
+	"9242,sr-Latn-RS,Serbian (Latin) - Serbia,9275,smn-FI,Sami (Inari) - Finland,10241,ar-SY,Arabic - Syria,10249,en-BZ,English - Belize,10250,es-PE,Spanish - Peru,10266,sr-Cyrl-RS,Serbian (Cyrillic) - Serbia," & _
+	"11265,ar-JO,Arabic - Jordan,11273,en-TT,English - Trinidad and Tobago,11274,es-AR,Spanish - Argentina,11290,sr-Latn-ME,Serbian (Latin) - Montenegro,12289,ar-LB,Arabic - Lebanon,12297,en-ZW,English - Zimbabwe," & _
+	"12298,es-EC,Spanish - Ecuador,12314,sr-Cyrl-ME,Serbian (Cyrillic) - Montenegro,13313,ar-KW,Arabic - Kuwait,13321,en-PH,English - Philippines,13322,es-CL,Spanish - Chile,14337,ar-AE,Arabic - U.A.E.," & _
+	"14346,es-UY,Spanish - Uruguay,15361,ar-BH,Arabic - Bahrain,15370,es-PY,Spanish - Paraguay,16385,ar-QA,Arabic - Qatar,16393,en-IN,English - India,16394,es-BO,Spanish - Bolivia,17417,en-MY,English - Malaysia," & _
+	"17418,es-SV,Spanish - El Salvador,18441,en-SG,English - Singapore,18442,es-HN,Spanish - Honduras,19466,es-NI,Spanish - Nicaragua,20490,es-PR,Spanish - Puerto Rico,21514,es-US,Spanish - United States," & _
+	"31748,zh-CHT,Chinese (Traditional) - China"
+	Local $LanguageTableArray = StringSplit($LanguageTable, ",", 1)
+	Local $LanguageCheck = _ArraySearch($LanguageTableArray, @OSLang)
+	If $LanguageCheck = -1 Then
+		Local $langXF = -1
+	Else
+		Local $langXF = $LanguageTableArray[$LanguageCheck + 1] & "," & $LanguageTableArray[$LanguageCheck + 2]
+	EndIf
+	Return $langXF
+EndFunc   ;==>langX
+;
+;===============================================================================================================
+; Function:		lang() - {LANG}
+;===============================================================================================================
+Func lang()
+	If Not langX() = -1 Then
+		Local $langF = StringSplit(langX(), ",", 1)
+		$langF = $langF[2]
+		$langF = StringRegExp($langF, "(?i)(.*) -", 1)
+		$langF = $langF[0]
+	Else
+		Local $langF = -1
+	EndIf
+	Return $langF
+EndFunc   ;==>lang
+;
+;===============================================================================================================
+; Function:		locale() - {LOCALE}
+;===============================================================================================================
+Func locale()
+	If Not langX() = -1 Then
+		Local $localeF = StringSplit(langX(), ",", 1)
+		$localeF = $localeF[1]
+		$localeF = StringRegExp($localeF, "(?i)(.*)-", 1)
+		$localeF = StringUpper($localeF[0])
+	Else
+		Local $localeF = -1
+	EndIf
+	Return $localeF
+EndFunc   ;==>locale
+;
+;===============================================================================================================
+; Function:		localename() - {LOCALENAME}
+;===============================================================================================================
+Func localename()
+	If Not langX() = -1 Then
+		Local $localenameF = StringSplit(langX(), ",", 1)
+		$localenameF = $localenameF[1]
+	Else
+		Local $localenameF = -1
+	EndIf
+	Return $localenameF
+EndFunc   ;==>localename
+;
+;===============================================================================================================
+; Function:		localenameshort() - {LOCALENAME_SHORT}
+;===============================================================================================================
+Func localenameshort()
+	If Not langX() = -1 Then
+		Local $localenameshortF = StringSplit(langX(), ",", 1)
+		$localenameshortF = $localenameshortF[1]
+		$localenameshortF = StringRegExp($localenameshortF, "(?i)(.*)-", 1)
+		$localenameshortF = StringLower($localenameshortF[0])
+	Else
+		Local $localenameshortF = -1
+	EndIf
+	Return $localenameshortF
+EndFunc   ;==>localenameshort
+;
+;===============================================================================================================
+; Function:		country() - {COUNTRY}
+;===============================================================================================================
+Func country()
+	If Not langX() = -1 Then
+		Local $countryF = StringSplit(langX(), ",", 1)
+		$countryF = $countryF[2]
+		$countryF = StringRegExp($countryF, "(?i)- (.*)", 1)
+		$countryF = $countryF[0]
+	Else
+		Local $countryF = -1
+	EndIf
+	Return $countryF
+EndFunc   ;==>country
+;
+; ===============================================================================================================
+; Function:		CryptChange()|ClipboardButtonClick()|SaveLicenseButtonClick()|gapHomepageButtonClick()|CloseGUI()
+; Source:		AutoIt help file "GUICtrlSetOnEvent" function reference example.
+; Description:	Encryption and Decryption Module GUI Code Actions.
+; Usage:		They will be called as the "OnEvent" actions happens.
+; ===============================================================================================================
+Func CryptChange()
+	If GUICtrlRead($InputBox1, 0) <> "" And GUICtrlRead($Passwordbox, 0) <> "" Then
+		Local $CryptCode = StringEncrypt(GUICtrlRead($ComboBox1, 0), GUICtrlRead($InputBox1, 0), GUICtrlRead($Passwordbox, 0))
+		GUICtrlSetData($InputBox2, $CryptCode)
+	Else
+		GUICtrlSetData($InputBox2, "Read the encrypted or decrypted text here.")
+	EndIf
+EndFunc   ;==>CryptChange
+Func ClipboardButtonClick()
+	If GUICtrlRead($InputBox2, 0) <> "" And GUICtrlRead($InputBox2, 0) <> "Read the encrypted or decrypted text here." Then
+		CryptChange()
+		Local $CryptCodeToClipboard = GUICtrlRead($InputBox2, 0)
+		ClipPut($CryptCodeToClipboard)
+	EndIf
+EndFunc   ;==>ClipboardButtonClick
+Func SaveLicenseButtonClick()
+	Local $LicenseToFile = GUICtrlRead($LicenseLabel, 0)
+	Local $LicenseFile = FileOpen(@ScriptDir & "\License.txt", 42)
+    If $LicenseFile = -1 Then
+        MsgBox(64, "License - " & $ProgramName, "An error occurred when creating or reading the License file.")
+        Return False
+	Else
+		FileWrite($LicenseFile, $LicenseToFile)
+		FileClose($LicenseFile)
+	EndIf
+EndFunc   ;==>SaveLicenseButtonClick
+Func gapHomepageButtonClick()
+	ShellExecute("http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129")
+EndFunc   ;==>gapHomepageButtonClick
+Func CloseGUI()
+	CleanMUICache()
+	CleanAppPaths()
+	Exit
+EndFunc   ;==>CloseGUI
+;
+; ===============================================================================================================
+; Function:		HashFile()
+; Source:		AutoIt help file "_Crypt_HashFile" function reference example.
+; Description:	Returns the SHA1 hash for a file according to user instructions.
+; Usage:		HashFile(Path to file to calculate the SHA1 hash)
+; ===============================================================================================================
+Func HashFile($hfFFilePath)
+    _Crypt_Startup() ; Start the Crypt library.
+    Local $hfFReturn = ""
+    If FileExists($hfFFilePath) Then
+		$hfFReturn = StringTrimLeft(_Crypt_HashFile($hfFFilePath, $CALG_SHA1), 2)
+	Else
+		$hfFReturn = -1
+	EndIf
+	_Crypt_Shutdown() ; Shutdown the Crypt library.
+    Return $hfFReturn
+EndFunc   ;==>HashFile
+;
+; ===============================================================================================================
+; Function:		HashData()
+; Source:		AutoIt help file "_Crypt_HashData" function reference example.
+; Description:	Returns the SHA1 hash for input data according to user instructions.
+; Usage:		HashData(Input data to calculate the SHA1 hash)
+; ===============================================================================================================
+Func HashData($hdFInputData)
+    _Crypt_Startup() ; Start the Crypt library.
+    Local $hdFReturn = StringTrimLeft(_Crypt_HashData($hdFInputData, $CALG_SHA1), 2)
+	_Crypt_Shutdown() ; Shutdown the Crypt library.
+    Return $hdFReturn
+EndFunc   ;==>HashData
+;
+; ===============================================================================================================
+; Function:		StringEncrypt()
+; Source:		AutoIt help file "_Crypt_EncryptData" function reference example 2.
+; Description:	Encrypt or decrypt data according to user instructions.
+; Usage:		StringEncrypt(Encrypt or Decrypt flag, data to encrypt or decrypt, password)
+; ===============================================================================================================
+Func StringEncrypt($seFEncrypt, $seFData, $seFPassword)
+    _Crypt_Startup() ; Start the Crypt library.
+    Local $seFReturn = ""
+    If $seFEncrypt = "Encrypt" Then ; If the flag is set to "Encrypt" then encrypt, otherwise decrypt.
+        $seFReturn = "!@@!" & _Crypt_EncryptData($seFData, $seFPassword, $CALG_AES_256) & "!@@!"
+    ElseIf $seFEncrypt = "Decrypt" Then
+        $seFReturn = BinaryToString(_Crypt_DecryptData(StringReplace($seFData, "!@@!", ""), $seFPassword, $CALG_AES_256))
+    EndIf
+    _Crypt_Shutdown() ; Shutdown the Crypt library.
+    Return $seFReturn
+EndFunc   ;==>StringEncrypt
+;
+; ===============================================================================================================
+; Function:		_SingletonPID()
+; Source:		https://www.autoitscript.com/wiki/Snippets_%28_AutoIt_%29#SingletonPID
+; Description:	Read the original function header below.
+; Usage:		Read the original function header below.
+; ===============================================================================================================
+;
+; #FUNCTION# ====================================================================================================
+; Name ..........: _SingletonPID
+; Description ...: Enforce a design paradigm where only one instance of the script may be running.
+; Syntax ........: _SingletonPID($sOccurenceName[, $iFlag = 0])
+; Parameters ....: $sOccurenceName      - String to identify the occurrence of the script.
+;                  $iFlag               - [optional] Optional parameters. Default is 0.
+;                  0 - Exit the script with the exit code -1 if another instance already exists.
+;                  1 - Return the PID of the main executable and without exiting the script too.
+; Return values .: Success - 0 No other process is running.
+;                  Failure - The PID of the main executable.
+; Author ........: guinness with initial ideas by Valik for _Singleton & KaFu for _EnforceSingleInstance.
+; Example .......: Yes
+; ===============================================================================================================
+Func _SingletonPID(Const $sOccurenceName, Const $iFlag = 0)
+    Local $hHandle = WinGetHandle($sOccurenceName)
+
+    If @error Then
+        AutoItWinSetTitle($sOccurenceName)
+        $hHandle = WinGetHandle($sOccurenceName)
+        ControlSetText($hHandle, '', ControlGetHandle($hHandle, '', 'Edit1'), @AutoItPID)
+    Else
+        If BitAND($iFlag, 1) Then
+            Return Number(ControlGetText($hHandle, '', ControlGetHandle($hHandle, '', 'Edit1')))
+        Else
+            Exit -1
+        EndIf
+    EndIf
+
+    Return 0
+EndFunc   ;==>_SingletonPID
+;
+; ===============================================================================================================
+; Function:		_ReduceMemory()
+; Source:		http://www.autoitscript.com/forum/topic/13399-reducememory-udf/?p=683969
+; Description:	Reduce memory usage of process ID (PID) given.
+; Usage:		_ReduceMemory(PID of the process to reduce memory usage - Default "0" is the current process)
+; ===============================================================================================================
+Func _ReduceMemory($ProcID = 0)
+	; Original version : w_Outer
+	; modified by Rajesh V R to include process ID
+	; modified by Prog@ndy to include process handle
+	If $ProcID = 0 or ProcessExists($ProcID) = 0 Then ; No process id specified or process doesn't exist - use current process instead.
+		Local $ai_GetCurrentProcess = DllCall("kernel32.dll", "ptr", "GetCurrentProcess")
+		Local $ai_Return = DllCall("psapi.dll", "int", "EmptyWorkingSet", "ptr", $ai_GetCurrentProcess[0])
+		Return $ai_Return[0]
+	EndIf
+	Local $ai_Handle = DllCall("kernel32.dll", "ptr", "OpenProcess", "int", 0x1f0fff, "int", False, "int", $ProcID)
+	Local $ai_Return = DllCall("psapi.dll", "int", "EmptyWorkingSet", "ptr", $ai_Handle[0])
+	DllCall("kernel32.dll", "int", "CloseHandle", "ptr", $ai_Handle[0])
+	Return $ai_Return[0]
+EndFunc   ;==>_ReduceMemory
+;
