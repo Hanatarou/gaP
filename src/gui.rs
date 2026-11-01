@@ -38,7 +38,7 @@ const ID_COPY: i32 = 105;
 const ID_SAVE: i32 = 106;
 const ID_LINK: i32 = 107;
 
-const HOMEPAGE: &str = "http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129";
+const HOMEPAGE: &str = "https://github.com/Hanatarou/gaP";
 
 const WS_DEFAULT_GUI: u32 = WS_MINIMIZEBOX | WS_CAPTION | WS_POPUP | WS_SYSMENU;
 const EM_SETCUEBANNER_: u32 = 0x1501;
@@ -148,7 +148,7 @@ pub fn run_crypt(script_full: &str) -> ! {
     unsafe {
         ui::init_common();
         let title = format!("Encryption and Decryption Module - {}", PROGRAM_NAME);
-        let hwnd = make_window("gaPCryptWnd", &title, 530, 210, Some(crypt_proc), 0x00FF_FFFF, WS_DEFAULT_GUI);
+        let hwnd = make_window("gaPCryptWnd", &title, 530, 262, Some(crypt_proc), 0x00FF_FFFF, WS_DEFAULT_GUI);
         BRUSH_OUT.with(|b| b.set(CreateSolidBrush(0x00E1FFFF)));
         let tab = WS_TABSTOP;
         make_ctrl(hwnd, "STATIC", "Password:", 0, 0, 8, 18, 56, 17, -1);
@@ -163,7 +163,7 @@ pub fn run_crypt(script_full: &str) -> ! {
         make_ctrl(hwnd, "BUTTON", "Copy to clipboard", tab | BS_PUSHBUTTON as u32, 0, 392, 112, 129, 85, ID_COPY);
         let warn = make_ctrl(
             hwnd, "STATIC", "WARNING: This encryption module uses AES 256 bit algorithm to encrypt or decrypt your data. There is no perfect encryption available and gaP encryption and decryption module IS NOT an exception. However, choosing a strong password will make decoding very hard for the average computer user.\r\n\r\nWARNING: Even if you launch the main application with encrypted command line parameters, gaP will pass unencrypted data to the application which may be visible to other applications.",
-            0, 0, 8, 110, 370, 90, -1,
+            0, 0, 8, 110, 370, 144, -1,
         );
         // Fonte 7 pt, negrito.
         let hdc = GetDC(null_mut());
@@ -299,15 +299,21 @@ pub fn run_about(script_full: &str) -> ! {
         make_ctrl(hwnd, "STATIC", &format!("Program version: {}", PROGRAM_VERSION), 0, 0, 8, 55, 167, 21, -1);
         make_ctrl(hwnd, "STATIC", "Author: Bruno Eduardo", 0, 0, 8, 79, 130, 21, -1);
         make_ctrl(hwnd, "STATIC", "Collaborators: tproli and all The Portable Freeware Collection Forums members", 0, 0, 8, 102, 380, 13, -1);
-        make_ctrl(hwnd, "STATIC", "Credits: AutoIt creators and all AutoIt Forums members", 0, 0, 8, 125, 380, 13, -1);
-        make_ctrl(hwnd, "STATIC", "gaP homepage:", 0, 0, 8, 149, 76, 17, -1);
-        let link = make_ctrl(hwnd, "STATIC", "gaP homepage", SS_NOTIFY as u32, 0, 86, 149, 85, 17, ID_LINK);
+        make_ctrl(hwnd, "STATIC", "Credits: AutoIt creators, AutoIt Forums members and Claude (Rust port)", 0, 0, 8, 125, 380, 13, -1);
+        make_ctrl(hwnd, "STATIC", "gaP GitHub:", 0, 0, 8, 149, 76, 17, -1);
+        let link = make_ctrl(hwnd, "STATIC", "gaP GitHub", SS_NOTIFY as u32, 0, 78, 149, 85, 17, ID_LINK);
         LINK.with(|c| c.set(link));
         let font = CreateFontW(-11, 0, 0, 0, 700, 0, 1, 0, 1, 0, 0, 0, 0, w("MS Sans Serif").as_ptr());
         SendMessageW(link, WM_SETFONT, font as WPARAM, 1);
         // Logotipo 80x80 a partir do ícone embutido (o original usava um BMP).
         let logo = make_ctrl(hwnd, "STATIC", "", SS_ICON as u32, 0, 300, 8, 80, 80, -1);
-        let icon = LoadImageW(ui::hinstance(), std::ptr::without_provenance::<u16>(1), IMAGE_ICON, 80, 80, LR_DEFAULTCOLOR);
+        // LoadIconWithScaleDown reduces the 256x256 image of the icon to 80x80 with smoothing; LoadImageW would
+        // pick the 48x48 one and enlarge it (blurry). LoadImageW stays as the fallback.
+        let mut icon: HICON = null_mut();
+        let res_id = std::ptr::without_provenance::<u16>(1);
+        if windows_sys::Win32::UI::Controls::LoadIconWithScaleDown(ui::hinstance(), res_id, 80, 80, &mut icon) < 0 {
+            icon = LoadImageW(ui::hinstance(), res_id, IMAGE_ICON, 80, 80, LR_DEFAULTCOLOR);
+        }
         if !icon.is_null() {
             SendMessageW(logo, STM_SETIMAGE, IMAGE_ICON as WPARAM, icon as LPARAM);
         }
