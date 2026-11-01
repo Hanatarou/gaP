@@ -342,7 +342,9 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
     if !util::exists(&f) {
         return;
     }
-    let wd = util::parent_dir(&f);
+    // The working directory is the folder as written: cmd.exe resolves it itself and
+    // `Sysnative` only exists for a 32-bit process.
+    let wd = util::parent_dir(&logical);
     let cmd = sys::system32_for(ctx.app_arch, "cmd.exe");
     let mut c = std::process::Command::new(cmd);
     c.current_dir(&wd);
