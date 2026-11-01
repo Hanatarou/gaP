@@ -1,0 +1,5 @@
+# Build output
+/target/
+
+# Cargo.lock is not versioned on purpose (see the README)
+Cargo.lock
