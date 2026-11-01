@@ -24,7 +24,7 @@ For everyone else: bug reports and PRs are evaluated on their merits (does it wo
 
 ## 🙏 Credits: yaP
 
-gaP is based on **yaP** by **tproli** (Roland Toth). I (Bruno Eduardo, known as **Aeolis** on the PortableFreeware forum) created gaP in AutoIt in 2015; this repository is the **Rust port** of it: the same ini format, the same keywords, the same macros and the same text encryption, so a launcher configuration written for the AutoIt gaP keeps working. The last AutoIt version was 1.1.5.0; the Rust port starts at 2.0.0.0. My thanks go to everyone at The Portable Freeware Collection forums who tested and discussed it.
+gaP is based on **yaP** by **tproli** (Roland Toth). I (Bruno Eduardo, known as **Aeolis** on The Portable Freeware Collection forums) created gaP in AutoIt in 2015; this repository is the **Rust port** of it: the same ini format, the same keywords, the same macros and the same text encryption, so a launcher configuration written for the AutoIt gaP keeps working. The last AutoIt version was 1.1.5.0; the Rust port starts at 2.0.0.0. My thanks go to everyone at The Portable Freeware Collection forums who tested and discussed it.
 
 - **gaP forum topic:** http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129
 - **yaP:** http://rolandtoth.hu/yaP/
@@ -65,7 +65,16 @@ There is no installer. Download the zip of your architecture from the [releases]
 | `gaP-v2.0.0.0-windows-x64.zip` | 64-bit Windows |
 | `gaP-v2.0.0.0-windows-x86.zip` | 32-bit and 64-bit Windows |
 
-(`v2.0.0.0` is the version; each zip has its `gaP-v2.0.0.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`. What depends on the architecture is the **application**, not the build of gaP: the first segment of `application` is the x86 application and the second one is the x64 application (use `NULL` as the first segment for an application that exists only as x64). The `System32` folder in paths, `regsvr32` and `cmd.exe` (`regdll`, `batch`) and the Java/.NET check (`!java`, `!dotnet`) follow the application that was launched. To change from one build to the other, replace `gaP.exe` and keep its name: the `.ini` has the same name.
+(`v2.0.0.0` is the version; each zip has its `gaP-v2.0.0.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`.
+
+### x86 and x64
+
+The same `.ini` works with both builds. What decides the architecture is the **application**, not the build of gaP:
+
+- the first segment of `application` is the x86 application and the second one is the x64 application; use `NULL` as the first segment for an application that exists only as x64;
+- the `System32` folder in paths, `regsvr32` and `cmd.exe` (`regdll`, `batch`) and the Java/.NET checks (`!java`, `!dotnet`) follow the application that was launched;
+- the registry flag (`x86` or `x64`) is always explicit and defaults to `x86`, whatever the build is; and
+- to change from one build to the other, replace `gaP.exe` and keep its name: the `.ini` has the same name.
 
 ### Requirements
 - Windows 10 or later (a limit of the Rust standard library, not of gaP itself). The C runtime is linked statically: nothing to install.
@@ -91,6 +100,16 @@ dir = %Appdata%\MyApp :: Data\MyApp\
 regkey = HKCU\Software\MyApp :: Data\settings.reg
 
 [AFTER]
+```
+
+An application that exists only as 64-bit, and a registry key of the 64-bit view:
+
+```ini
+[GENERAL]
+application = NULL :: App\MyApp_x64.exe
+
+[BEFORE]
+regkey = HKLM\Software\MyApp :: Data\settings.reg :: x64
 ```
 
 `dir`, `file`, `regkey` and `regvalue` are "wrap" items: they run before and after the application. The complete reference (every keyword, with syntax and examples) is in `gaP_Help.txt`; run `gaP.exe -help` to create it next to the program.
@@ -195,7 +214,7 @@ Rename the result to `gaP.exe` (or to the name of your launcher).
 cargo test
 ```
 
-The unit tests cover the text encryption (round trip and the SHA-1 test vector) and the macro parser. They do not replace trying a launcher on a real application.
+The unit tests cover, among other things, the text encryption (round trip and the SHA-1 test vector), the macro parser (the `{VAR}` escapes and the detection of an undefined `%VAR%`), the building of registry values, the values of `!os` and the rewriting of `System32` paths for the architecture of the application. They do not replace trying a launcher on a real application, nor running the same `.ini` with the x86 and the x64 build on a 64-bit Windows.
 
 ### Dependencies
 
@@ -208,8 +227,7 @@ The unit tests cover the text encryption (round trip and the SHA-1 test vector) 
 - Do not put a secret you care about in an `.ini`, even encrypted; see *Encrypted text*.
 
 ## 📚 Additional Info
-- **gaP forum topic:** http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129
-- **yaP (base of gaP):** http://rolandtoth.hu/yaP/
+- **Source code and releases:** https://github.com/Hanatarou/gaP
 - **Original program:** gaP in AutoIt, by Bruno Eduardo, 2015 (last version 1.1.5.0)
 - **Author:** Bruno Eduardo, https://github.com/Hanatarou
 - **License:** MIT (see [LICENSE](LICENSE)); the same text is shown by `gaP.exe -license`

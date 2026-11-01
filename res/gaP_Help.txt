@@ -1,12 +1,18 @@
 [Revision]
 
-This file is Revision 4 from 18/JUL/2015.
+This file is Revision 5 from 01/NOV/2026 (gaP 2.0.0.0, the Rust port; the
+source code and the releases are at the gaP repository, #15). Revision 4,
+from 18/JUL/2015, was the last one of the AutoIt version.
 
 [About]
 
 gaP is a universal DIY (Do It Yourself) style launcher for creating
 portable applications on Windows. gaP is based on yaP which is tproli
 creation (#1, #2).
+
+Version 2.0.0.0 and newer are a port of gaP from AutoIt to Rust. They read
+the same ini files. The source code and the releases are at the gaP
+repository (#15).
 
 [Credits]
 
@@ -169,6 +175,28 @@ are not reported.
 On a 64-bit Windows, a path inside the Windows "System32" folder is the
 one the main application sees, whatever the build of gaP (x86 or x64) is.
 
+x86 and x64:
+
+The same ini file works with the x86 and with the x64 build of gaP. What
+decides the architecture is the main application, not gaP:
+
+* The first segment of "application" is the x86 application and the second
+  one is the x64 application. The architecture of the main application is
+  the one of the segment that gaP launched;
+* The "System32" folder in paths, the "regdll" and "batch" keywords and the
+  "!java" and "!dotnet" checks follow the architecture of the main
+  application;
+* The Registry flag [x86|x64] of the registry keywords is always explicit and
+  defaults to "x86", whatever the architecture of gaP or of the application
+  is. "x86" is the 32-bit view of the registry (Wow6432Node under
+  "HKLM\Software") and "x64" is the 64-bit view. Use "x64" for the keys of
+  an x64 application;
+* "HKCU\Software" is a single key shared by the two views, so the flag makes
+  no difference there, except for the keys that Windows redirects (the ones
+  under "HKCU\Software\Classes", like "CLSID"); and
+* A keyword followed by "x86" or "x64" ("keywordx64") is processed only if
+  the architecture of Windows matches.
+
 Special characters:
 
 Variables can be called by using curly brackets "{" and "}" around their
@@ -251,13 +279,13 @@ Indicate that administrator rights are required for the main application to run.
 
 Syntax:
 
-!administrator = Action number [-1|1|2]
+!admin = Action number [-1|1|2]
 
 Examples:
 
-!administrator = -1                  ; quit if user doesn't have administrator rights (no message)
-!administrator = 1                   ; start the launcher with administrator rights
-!administrator = 2                   ; show a message if user is not administrator and quit
+!admin = -1                          ; quit if user doesn't have administrator rights (no message)
+!admin = 1                           ; start the launcher with administrator rights
+!admin = 2                           ; show a message if user is not administrator and quit
 
 Notes:
 
@@ -352,19 +380,23 @@ application's minimum or maximum OS requirement.
 
 Syntax:
 
-!os = OS action code [XP|Vista|7|8|8.1]
+!os = OS action code [XP|Vista|7|8|8.1|10|11]
 
 Examples:
 
-!os = XP                             ; the main application requires Windows XP or newer
 !os = Vista                          ; the main application requires Windows Vista or newer
-!os = <7                             ; the main application requires Windows 7 or older
-!os = 8                              ; the main application requires Windows 8 or newer
+!os = 10                             ; the main application requires Windows 10 or newer
+!os = 11                             ; the main application requires Windows 11 or newer
+!os = <8.1                           ; the main application requires Windows 8.1 or older
 
 Notes:
 
 * Use the "<" character before the OS action code to
-  indicate the maximum OS version.
+  indicate the maximum OS version;
+* Windows 11 is told from Windows 10 by its build number (22000 or newer);
+* gaP 2.0.0.0 runs on Windows 10 or newer, so a minimum below 10 is always
+  met, but a maximum ("<") is still useful; and
+* A value that is not in the list shows a message and the check is skipped.
 
 [!readonly]
 Description:
@@ -480,10 +512,10 @@ regkey = Source registry key [ :: Target registry export file or target director
 
 Examples:
 
-regkey = HKCU\Software\RegKey :: SubDir\settings.reg       ; save the x86 reg key (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
-regkey = HKCU\Software\RegKey :: settings.reg :: x64       ; save the x64 reg key in "{GAPROOT}\settings.reg"
-regkey = HKCU\Software\RegKey :: SubDir                    ; save the x86 reg key (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
-regkey = HKCU\Software\RegKey :: NULL :: x64               ; save the x64 reg key in "{GAPROOT}\settings.reg"
+regkey = HKLM\Software\RegKey :: SubDir\settings.reg       ; save the x86 reg key (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regkey = HKLM\Software\RegKey :: settings.reg :: x64       ; save the x64 reg key in "{GAPROOT}\settings.reg"
+regkey = HKLM\Software\RegKey :: SubDir                    ; save the x86 reg key (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regkey = HKLM\Software\RegKey :: NULL :: x64               ; save the x64 reg key in "{GAPROOT}\settings.reg"
 
 Notes:
 
@@ -512,10 +544,10 @@ regvalue = Source registry value [ :: Target registry export file or target dire
 
 Examples:
 
-regvalue = HKCU\Software\Key\Value :: SubDir\settings.reg            ; save the x86 reg value (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
-regvalue = HKCU\Software\Key\Value :: settings.reg :: x64            ; save the x64 reg value in "{GAPROOT}\SubDir\settings.reg"
-regvalue = HKCU\Software\Key\Value :: SubDir                         ; save the x86 reg value (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
-regvalue = HKCU\Software\Key\Value :: NULL :: x64                    ; save the x64 reg value in "{GAPROOT}\settings.reg"
+regvalue = HKLM\Software\Key\Value :: SubDir\settings.reg            ; save the x86 reg value (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regvalue = HKLM\Software\Key\Value :: settings.reg :: x64            ; save the x64 reg value in "{GAPROOT}\SubDir\settings.reg"
+regvalue = HKLM\Software\Key\Value :: SubDir                         ; save the x86 reg value (Wow6432Node) in "{GAPROOT}\SubDir\settings.reg"
+regvalue = HKLM\Software\Key\Value :: NULL :: x64                    ; save the x64 reg value in "{GAPROOT}\settings.reg"
 
 Notes:
 
@@ -588,7 +620,7 @@ Syntax:
 
 Examples:
 
-(regkey) = HKCU\Software\RegKey :: x64
+(regkey) = HKLM\Software\RegKey :: x64
 
 Notes:
 
@@ -613,7 +645,7 @@ Syntax:
 
 Examples:
 
-(regvalue) = HKCU\Software\Key\Value :: x64
+(regvalue) = HKLM\Software\Key\Value :: x64
 
 Notes:
 
@@ -701,7 +733,7 @@ Syntax:
 
 Examples:
 
-->regkey = HKCU\Software\A :: HKCU\Software\B :: NULL :: x64                   ; copy contents of regkey A to B
+->regkey = HKLM\Software\A :: HKLM\Software\B :: NULL :: x64                   ; copy contents of regkey A to B
 <-regkey = HKCU\Software\A :: HKCU\Software\B :: move                          ; move contents of regkey B to A
 ->regkey = HKCU\Software\OldKey :: HKCU\Software\NewKey :: move                ; rename regkey
 
@@ -727,7 +759,7 @@ Syntax:
 
 Examples:
 
-->regvalue = HKCU\Software\Key\A :: HKCU\Software\Key\B :: NULL :: x64                   ; copy value of A to B
+->regvalue = HKLM\Software\Key\A :: HKLM\Software\Key\B :: NULL :: x64                   ; copy value of A to B
 <-regvalue = HKCU\Software\Key\A :: HKCU\Software\Key\B :: move                          ; move value of B to A
 ->regvalue = HKCU\Software\Key\OldValue :: HKCU\Software\Key\NewValue :: move            ; rename value
 
@@ -793,7 +825,7 @@ Syntax:
 
 Examples:
 
-+regkey = HKCU\Software\RegKey :: x64
++regkey = HKLM\Software\RegKey :: x64
 
 Notes:
 
@@ -810,19 +842,24 @@ Syntax:
 
 Examples:
 
-+regvalue = HKCU\Software\MyApp :: Language :: English :: NULL :: NULL :: x64
++regvalue = HKLM\Software\MyApp :: Language :: English :: NULL :: NULL :: x64
 +regvalue = HKCU\Software\MyApp :: FirstStart :: 0 :: REG_DWORD
 
 Notes:
 
 * "RegKey" is the registry key where the value will be added;
 * "RegValueName" is the name of the registry value to be added;
-* "RegValueData" is the data to add to "RegValueName";
+* "RegValueData" is the data to add to "RegValueName". It depends on the
+  "DataType": text for "REG_SZ" and "REG_EXPAND_SZ"; a decimal number or a
+  hexadecimal one with the "0x" prefix for "REG_DWORD" and "REG_QWORD";
+  hexadecimal digits for "REG_BINARY" and "REG_NONE" ("01,00,ff" or
+  "0100ff": the characters that are not hexadecimal digits are ignored); and
+  the items separated by "RegSeparator" for "REG_MULTI_SZ";
 * "DataType" is the type of the "RegValueData". Defaults to "REG_SZ" if
   missing. Some possible values are "REG_SZ", "REG_MULTI_SZ", "REG_EXPAND_SZ",
   "REG_DWORD", "REG_QWORD", "REG_BINARY" etc.;
-* "RegSeparator" is the separator for "DataType" "REG_MULTI_SZ". Not
-  needed for other types; and
+* "RegSeparator" is the separator for "DataType" "REG_MULTI_SZ" (defaults
+  to "\0", a backslash and a zero). Not needed for other types; and
 * If the Registry flag is not declared it defaults to "x86".
 
 [-dir]
@@ -875,7 +912,7 @@ Syntax:
 
 Examples:
 
--regkey = HKCU\Software\RegKey :: NULL :: x64
+-regkey = HKLM\Software\RegKey :: NULL :: x64
 -regkey = HKCU\Software\RegKey :: ifempty
 
 Notes:
@@ -895,7 +932,7 @@ Syntax:
 
 Examples:
 
--regvalue = HKCU\Software\MyApp :: Lang :: x64
+-regvalue = HKLM\Software\MyApp :: Lang :: x64
 
 Notes:
 
@@ -1218,8 +1255,8 @@ regexport = Registry key or value [ :: Target file or directory path] [ :: Regis
 
 Examples:
 
-regexport = HKCU\Software\App\ :: C:\Dir\reginfo.reg :: x64  ; export the x64 key in "C:\Dir\reginfo.reg"
-regexport = HKCU\Software\App\ :: C:\Dir\reginfo.reg :: x86  ; export the x86 key (Wow6432Node) in "C:\Dir\reginfo.reg"
+regexport = HKLM\Software\App\ :: C:\Dir\reginfo.reg :: x64  ; export the x64 key in "C:\Dir\reginfo.reg"
+regexport = HKLM\Software\App\ :: C:\Dir\reginfo.reg :: x86  ; export the x86 key (Wow6432Node) in "C:\Dir\reginfo.reg"
 regexport = HKCU\Software\App\ :: Dir\reginfo.reg            ; export key in "{GAPROOT}\Dir\reginfo.reg"
 regexport = HKCU\Software\App\ :: Settings\                  ; export key in "{GAPROOT}\Settings\settings.reg"
 regexport = HKCU\Software\App\                               ; export key in "{GAPROOT}\settings.reg"
@@ -1245,7 +1282,7 @@ regimport = RegFile.reg [ :: Registry flag [x86|x64]]
 Examples:
 
 regimport = Dir\reginfo.reg :: x64                           ; import the "Dir\reginfo.reg" file in x64 Registry
-regimport = Dir\reginfo.reg :: x86                           ; import the "Dir\reginfo.reg" file in x86 Registry (Wow6432Node)
+regimport = Dir\reginfo.reg :: x86                           ; import the "Dir\reginfo.reg" file in x86 Registry (Wow6432Node of "HKLM\Software")
 
 Notes:
 
@@ -1318,10 +1355,10 @@ restore = 1
 Notes:
 
 * This function works ONLY in the AFTER section; and
-* When using keywords "dir", "file", "regkey", "(dir)", "(file)",
-  "(regkey)" and "symlink" gaP automatically adds their AFTER operations
-  to the processing queue. By default these items are run right after
-  closing the main application. If the "restore" keyword with value 1 is
+* When using keywords "dir", "file", "regkey", "regvalue", "(dir)", "(file)",
+  "(regkey)", "(regvalue)" and "symlink" gaP automatically adds their AFTER
+  operations to the processing queue. By default these items are run right
+  after closing the main application. If the "restore" keyword with value 1 is
   present then gaP will run these items where this keyword is found in the
   list.
 
@@ -1409,9 +1446,9 @@ Notes:
 
 * This function works ONLY in the BEFORE section;
 * The symlink is removed when the launcher terminates; and
-* Administrator rights, NTFS file system and a compatible OS
-  are needed to successfully create a symlink. gaP checks for
-  administrator rights and for NTFS file system.
+* An NTFS (or ReFS) file system is needed. Creating the link needs
+  administrator rights or the Windows Developer Mode: gaP tries first
+  without administrator rights and shows a message if it fails.
 
 [systemrefresh]
 Description:
@@ -1494,7 +1531,7 @@ Notes:
 
 [Misc macros]
 
-{OSARCH} architecture type of the currently running operating system (x86, ia64 or x64)
+{OSARCH} architecture type of the currently running operating system (x86 or x64)
 {COMMANDLINE} parameters passed to the main application
 {PARAMETERS} parameters passed to the launcher
 
@@ -1544,8 +1581,8 @@ A: gaP is not designed to be compatible with PA but creating the extra
    dirs/files that PA requires it can be done.
 
 Q: Can I use UPX (#12) to further reduce the launcher size?
-A: No. I have done that already to squeeze the bytes. Keep in mind that
-   some AV software may flag it as malicious due to UPX compression.
+A: No. The releases are already built for size and some AV software may
+   flag an executable compressed with UPX as malicious.
 
 Q: Can I use "HKCU" and "HKEY_CURRENT_USER" interchangeably?
 A: Yes, just like "HKLM" and "HKCR" as well.
@@ -1560,10 +1597,23 @@ Q: Can I use "..\" or nested directories in paths?
 A: Yes. "+file = ..\Subdir1\Subdir2\MyFile.txt" will work.
 
 Q: What programming language is gaP written in? Is the source code available?
-A: gaP is written in AutoIt (#13). The source code is not available yet.
+A: Version 2.0.0.0 and newer are written in Rust and the source code is
+   available under the MIT license at the gaP repository (#15). Versions up
+   to 1.1.5.0 were written in AutoIt (#13).
 
 Q: Where can I submit a new example configuration or report a bug?
-A: Visit the gaP forum topic at The Portable Freeware Collection (#14).
+A: Visit the gaP forum topic at The Portable Freeware Collection (#14) or
+   the gaP repository (#15).
+
+Q: I get the message "The "NAME" variable isn't defined and can't be used."
+A: NAME is written as {NAME} or %NAME% in the ini file but it is not a gaP
+   macro, a user variable ("uservar", "iniread", "stringreplace"), a shell
+   folder or an environment variable. Check the spelling.
+
+Q: I get the message "Administrator rights may be required."
+A: A registry operation could not be done and gaP is not running as
+   administrator. Set "!admin = 1" in the GENERAL section to start the
+   launcher with administrator rights.
 
 [References]
 1) http://rolandtoth.hu/yaP/
@@ -1580,3 +1630,4 @@ A: Visit the gaP forum topic at The Portable Freeware Collection (#14).
 12) http://upx.sourceforge.net/
 13) https://www.autoitscript.com/site/
 14) http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129
+15) https://github.com/Hanatarou/gaP

@@ -505,24 +505,44 @@ pub fn online_init(ctx: &mut Ctx) {
 
 // ------------------------------------------------------------------------ OS
 
+/// Windows version as compared by `!os`. Windows 11 is still "10.0": it is told from
+/// Windows 10 by its build number (22000 or newer).
+fn os_level(major: u32, minor: u32, build: u32) -> (u32, u32, u32) {
+    (major, minor, u32::from(major == 10 && minor == 0 && build >= 22000))
+}
+
+/// Value of `!os` (XP, Vista, 7, 8, 8.1, 10, 11) as an `os_level`.
+fn os_threshold(name: &str) -> Option<(u32, u32, u32)> {
+    match name.to_lowercase().as_str() {
+        "xp" => Some((5, 1, 0)),
+        "vista" => Some((6, 0, 0)),
+        "7" => Some((6, 1, 0)),
+        "8" => Some((6, 2, 0)),
+        "8.1" => Some((6, 3, 0)),
+        "10" => Some((10, 0, 0)),
+        "11" => Some((10, 0, 1)),
+        _ => None,
+    }
+}
+
 pub fn os_init(ctx: &mut Ctx) {
     let os = general(ctx, "!os", "");
     if os.is_empty() {
         return;
     }
-    let (ma, mi, _) = sys::os_version();
-    let cur = (ma, mi);
+    let (ma, mi, build) = sys::os_version();
+    let cur = os_level(ma, mi, build);
     let (older, name) = match os.strip_prefix('<') {
         Some(n) => (true, n.to_string()),
         None => (false, os.clone()),
     };
-    let thr = match name.to_lowercase().as_str() {
-        "xp" => (5, 1),
-        "vista" => (6, 0),
-        "7" => (6, 1),
-        "8" => (6, 2),
-        "8.1" => (6, 3),
-        _ => return,
+    let Some(thr) = os_threshold(&name) else {
+        // NEW (gaP-rs): the original ignored a value it did not know without saying anything.
+        ctx.msg(&format!(
+            "The \"{}\" value of \"!os\" isn't valid. Use XP, Vista, 7, 8, 8.1, 10 or 11 (with \"<\" before it for the maximum version).",
+            os
+        ));
+        return;
     };
     let pretty = match name.to_lowercase().as_str() {
         "xp" => "XP",
@@ -542,4 +562,24 @@ pub fn os_init(ctx: &mut Ctx) {
 
 pub fn wait_init(ctx: &mut Ctx) {
     ctx.waitprocess = general(ctx, "!waitprocess", "");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{os_level, os_threshold};
+
+    #[test]
+    fn os_values_and_levels() {
+        assert_eq!(os_threshold("10"), Some((10, 0, 0)));
+        assert_eq!(os_threshold("Vista"), Some((6, 0, 0)));
+        assert_eq!(os_threshold("12"), None);
+        // Windows 10 and Windows 11 are both "10.0"; the build tells them apart
+        let (w10, w11, w81) = (os_level(10, 0, 19045), os_level(10, 0, 22631), os_level(6, 3, 9600));
+        assert!(w10 < os_threshold("11").unwrap() && w10 >= os_threshold("10").unwrap());
+        assert!(w11 >= os_threshold("11").unwrap());
+        // "<8.1" (8.1 or older) is met by 8.1 and not by 10
+        assert!(w81 <= os_threshold("8.1").unwrap() && w10 > os_threshold("8.1").unwrap());
+        // "<10" (10 or older) is met by Windows 10 and not by Windows 11
+        assert!(w10 <= os_threshold("10").unwrap() && w11 > os_threshold("10").unwrap());
+    }
 }

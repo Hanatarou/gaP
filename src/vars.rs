@@ -1,25 +1,17 @@
 //! Macro expansion (`FindReplaceX`): `{VAR}`, `{{VAR}}`, `!@@!…!@@!`
 //! (encrypted text), `%ShellFolder%`, `%ENVIRONMENT_VARIABLE%` and escapes
-//! `<{`, `<}`, `<<`.
+//! `<{` and `<}`.
 
 use crate::ctx::{exit_now, Ctx, FUNC_MACROS};
 use crate::langtable::LANGS;
 use crate::{crypto, sys, ui, util};
 
-/// Looks for unescaped `open … close` (even number of '<' before each
-/// delimiter). Returns (start, end_exclusive, inner content).
+/// Looks for unescaped `open … close` (a delimiter right after a '<' is escaped).
+/// Returns (start, end_exclusive, inner content).
 fn find_braced(s: &str, depth: usize) -> Option<(usize, usize, String)> {
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len();
-    let unescaped = |i: usize| -> bool {
-        let mut k = 0;
-        let mut j = i;
-        while j > 0 && chars[j - 1] == '<' {
-            k += 1;
-            j -= 1;
-        }
-        k % 2 == 0
-    };
+    let unescaped = |i: usize| -> bool { i == 0 || chars[i - 1] != '<' };
     let mut i = 0;
     while i + depth <= n {
         if (0..depth).all(|k| chars[i + k] == '{') && unescaped(i) {
@@ -41,7 +33,7 @@ fn find_braced(s: &str, depth: usize) -> Option<(usize, usize, String)> {
 }
 
 pub fn unescape(s: &str) -> String {
-    s.replace("<{", "{").replace("<}", "}").replace("<<", "<")
+    s.replace("<{", "{").replace("<}", "}")
 }
 
 /// Expands `%NAME%` with environment variables (AutoIt Option ExpandEnvStrings).
@@ -280,9 +272,11 @@ mod tests {
     fn braces_escape() {
         assert_eq!(find_braced("a {X} b", 1).map(|t| t.2), Some("X".to_string()));
         assert!(find_braced("a <{X<} b", 1).is_none());
-        assert_eq!(find_braced("a <<{X} b", 1).map(|t| t.2), Some("X".to_string()));
+        // only "<{" and "<}" escape; the old "<<" is not special any more
+        assert!(find_braced("a <<{X} b", 1).is_none());
+        assert_eq!(find_braced("a < {X} b", 1).map(|t| t.2), Some("X".to_string()));
         assert_eq!(find_braced("{{A}}", 2).map(|t| t.2), Some("A".to_string()));
-        assert_eq!(unescape("<{x<}<<"), "{x}<");
+        assert_eq!(unescape("<{x<}<<"), "{x}<<");
     }
 
     #[test]
