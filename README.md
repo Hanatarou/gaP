@@ -199,7 +199,7 @@ The unit tests cover the text encryption (round trip and the SHA-1 test vector) 
 
 ### Dependencies
 
-[`windows-sys`](https://crates.io/crates/windows-sys) for the Win32 API, the [RustCrypto](https://github.com/RustCrypto) crates `aes`, `cbc`, `cipher`, `md-5` and `sha1` for the text encryption and SHA-1, and [`embed-resource`](https://crates.io/crates/embed-resource) (build only) for the icon, version information and manifest. `Cargo.lock` is committed.
+[`windows-sys`](https://crates.io/crates/windows-sys) for the Win32 API, the [RustCrypto](https://github.com/RustCrypto) crates `aes`, `cbc`, `cipher`, `md-5` and `sha1` for the text encryption and SHA-1, and [`embed-resource`](https://crates.io/crates/embed-resource) (build only) for the icon, version information and manifest. There is no `Cargo.lock` in the repository on purpose: every build takes the newest versions of the crates that `Cargo.toml` allows.
 
 ## ⚠️ Warning
 
