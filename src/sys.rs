@@ -16,7 +16,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::Environment::GetCommandLineW;
 
-use crate::util::{from_w, w};
+use crate::util::{self, from_w, w};
 
 // ------------------------------------------------------------ OS / version
 
@@ -272,6 +272,47 @@ pub fn run_hidden_wait(exe: &str, args: &[&str]) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// Architecture of this process (gaP itself): "x86" or "x64".
+pub fn gap_arch() -> &'static str {
+    if cfg!(target_pointer_width = "64") {
+        "x64"
+    } else {
+        "x86"
+    }
+}
+
+/// Windows directory (`C:\Windows`); never redirected.
+pub fn windows_dir() -> String {
+    use std::sync::OnceLock;
+    static DIR: OnceLock<String> = OnceLock::new();
+    DIR.get_or_init(|| unsafe {
+        let mut buf = [0u16; 260];
+        let n = GetWindowsDirectoryW(buf.as_mut_ptr(), 260);
+        String::from_utf16_lossy(&buf[..n as usize])
+    })
+    .clone()
+}
+
+/// A tool of the system folder that matches the architecture of the main application
+/// (`SysWOW64` for x86, the real `System32` for x64), whatever the architecture of gaP is.
+/// On 32-bit Windows there is only `System32`.
+pub fn system32_for(app_arch: &str, name: &str) -> String {
+    if os_arch() != "x64" {
+        return system32(name);
+    }
+    let dir = match (app_arch, gap_arch()) {
+        ("x86", _) => "SysWOW64",
+        (_, "x64") => "System32",
+        _ => "Sysnative", // gaP x86 reaching the 64-bit System32
+    };
+    format!("{}\\{}\\{}", windows_dir(), dir, name)
+}
+
+/// `util::rewrite_system32` for this machine: a path as the main application sees it.
+pub fn io_path(app_arch: &str, p: &str) -> String {
+    util::rewrite_system32(p, &windows_dir(), os_arch(), gap_arch(), app_arch)
 }
 
 pub fn system32(name: &str) -> String {

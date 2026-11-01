@@ -121,6 +121,9 @@ pub struct Ctx {
     pub file_hash: String,
     pub cmd_raw: String,
     pub os_arch: &'static str,
+    /// Architecture of the chosen main application: "x64" only if the 2nd segment of
+    /// `application` was chosen, "x86" otherwise.
+    pub app_arch: &'static str,
 
     pub is_readonly: bool,
     pub first_instance: bool,
@@ -167,6 +170,7 @@ impl Ctx {
             ini_path,
             cmd_raw: sys::cmdline_raw(),
             os_arch: sys::os_arch(),
+            app_arch: "x86",
             is_readonly: false,
             first_instance: true,
             run_after: true,
@@ -240,6 +244,11 @@ impl Ctx {
         if let Some(l) = &self.debug {
             l.write(text);
         }
+    }
+
+    /// A path as the main application sees it (see `util::rewrite_system32`).
+    pub fn io_path(&self, p: &str) -> String {
+        sys::io_path(self.app_arch, p)
     }
 
     /// Default message for "function called in the wrong section".

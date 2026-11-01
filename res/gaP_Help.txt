@@ -160,6 +160,15 @@ around them if they contain spaces. Environment variables, shell folders
 and gaP macros (see the Variables and macros section) can also be used
 when constructing paths.
 
+A %NAME% that is neither a shell folder nor an environment variable is
+reported like an undefined {NAME}: The "NAME" variable isn't defined and
+can't be used. Batch parameters (%1, %~dp0) and the variables that cmd.exe
+expands only at run time (%CD%, %DATE%, %TIME%, %RANDOM%, %ERRORLEVEL%)
+are not reported.
+
+On a 64-bit Windows, a path inside the Windows "System32" folder is the
+one the main application sees, whatever the build of gaP (x86 or x64) is.
+
 Special characters:
 
 Variables can be called by using curly brackets "{" and "}" around their
@@ -189,6 +198,15 @@ Notes:
 
 * On a 64bit OS gaP automatically launches the application set in the
 second segment (if available).
+* The first segment is the x86 application and the second one is the x64
+application: the architecture of the main application is the one of the
+segment that gaP launched. On a 32bit OS it is always the first one.
+* For an application that exists only as x64 use NULL as the first segment.
+* Both gaP builds (x86 and x64) behave the same way with the same .ini. What
+depends on the architecture of the main application, and not on the one of
+gaP, is: the "System32" folder in paths, the "regdll" and "batch" keywords
+(the 64bit System32 for an x64 application, SysWOW64 for an x86 one) and the
+registry view where "!java" and "!dotnet" look for Java and .NET.
 
 [commandline]
 Description:
@@ -910,7 +928,8 @@ Notes:
 [batch]
 Description:
 
-Execute a batch file.
+Execute a batch file, with the cmd.exe of the architecture of the main
+application.
 
 Syntax:
 
@@ -1172,7 +1191,8 @@ the main application.
 [regdll]
 Description:
 
-Register or unregister a dll file.
+Register or unregister a dll file, with the regsvr32.exe of the architecture
+of the main application.
 
 Syntax:
 

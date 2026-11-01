@@ -62,24 +62,30 @@ fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
 
 // ---------------------------------------------------------------- copy / move
 
-pub fn copy_key(src: &str, tgt: &str, mv: bool, view: View) {
+// NEW (gaP-rs): a copy that fails (or a move whose source cannot be removed) is reported; before it
+// was silent. A missing source is still silent: there is nothing to copy or to restore.
+pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
     if eq_ic(src, tgt) || !reg::key_exists(src, view) {
         return;
     }
-    if reg::copy_tree(src, tgt, view) && mv {
-        reg::delete_tree(src, view);
+    if !reg::copy_tree(src, tgt, view) {
+        change_failed(ctx, &format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt));
+    } else if mv && !reg::delete_tree(src, view) {
+        change_failed(ctx, &format!("The registry key \"{}\" was copied but could not be removed.", src));
     }
 }
 
-pub fn copy_value(src: &str, tgt: &str, mv: bool, view: View) {
+pub fn copy_value(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
     if eq_ic(src, tgt) {
         return;
     }
     let (sk, sv) = split_value(src);
     let (tk, tv) = split_value(tgt);
     let Some(v) = reg::read_value(&sk, &sv, view) else { return };
-    if reg::write_value(&tk, &tv, v.kind, &v.data, view) && mv {
-        reg::delete_value(&sk, &sv, view);
+    if !reg::write_value(&tk, &tv, v.kind, &v.data, view) {
+        change_failed(ctx, &format!("The registry value \"{}\" could not be copied to \"{}\".", src, tgt));
+    } else if mv && !reg::delete_value(&sk, &sv, view) {
+        change_failed(ctx, &format!("The registry value \"{}\" was copied but could not be removed.", src));
     }
 }
 
@@ -92,7 +98,7 @@ pub fn ltr_regkey(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let tgt = key_of(ctx, &b);
     let cflag = ctx.expand(arg(args, 2));
     let view = view_of(ctx, arg(args, 3));
-    copy_key(&src, &tgt, eq_ic(&cflag, "move"), view);
+    copy_key(ctx, &src, &tgt, eq_ic(&cflag, "move"), view);
 }
 
 pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
@@ -104,7 +110,7 @@ pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let tgt = key_of(ctx, &b);
     let cflag = ctx.expand(arg(args, 2));
     let view = view_of(ctx, arg(args, 3));
-    copy_value(&src, &tgt, eq_ic(&cflag, "move"), view);
+    copy_value(ctx, &src, &tgt, eq_ic(&cflag, "move"), view);
 }
 
 // ------------------------------------------------------------ create / delete
@@ -166,7 +172,7 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     let file = settings_reg(ctx, arg(args, 1));
     let view = view_of(ctx, arg(args, 2));
     let backup = format!("{}_backup", src);
-    copy_key(&src, &backup, false, view);
+    copy_key(ctx, &src, &backup, false, view);
     delete_key(&src, false, view);
     import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: format!("{}\\", src), file, view });
@@ -183,7 +189,7 @@ pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 2));
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
-    copy_value(&src, &backup, false, view);
+    copy_value(ctx, &src, &backup, false, view);
     import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: src.clone(), file, view });
     ctx.after_prog.push(Prog::MinusRegValue { key: k.clone(), name: v, view });
@@ -197,7 +203,7 @@ pub fn pregkeyp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
     let backup = format!("{}_backup", src);
-    copy_key(&src, &backup, false, view);
+    copy_key(ctx, &src, &backup, false, view);
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: false, view });
     ctx.after_prog.push(Prog::LtrRegKey { src: backup, tgt: src.clone(), mv: true, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: true, view });
@@ -210,7 +216,7 @@ pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 1));
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
-    copy_value(&src, &backup, false, view);
+    copy_value(ctx, &src, &backup, false, view);
     ctx.after_prog.push(Prog::MinusRegValue { key: k.clone(), name: v, view });
     ctx.after_prog.push(Prog::LtrRegValue { src: backup, tgt: src, mv: true, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: k.clone(), if_empty: true, view });
@@ -225,8 +231,8 @@ pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
         Prog::MinusRegValue { key, name, view } => {
             reg::delete_value(key, name, *view);
         }
-        Prog::LtrRegKey { src, tgt, mv, view } => copy_key(src, tgt, *mv, *view),
-        Prog::LtrRegValue { src, tgt, mv, view } => copy_value(src, tgt, *mv, *view),
+        Prog::LtrRegKey { src, tgt, mv, view } => copy_key(ctx, src, tgt, *mv, *view),
+        Prog::LtrRegValue { src, tgt, mv, view } => copy_value(ctx, src, tgt, *mv, *view),
         Prog::CleanParents { key, view } => reg::delete_empty_parents(key, *view),
         _ => {}
     }

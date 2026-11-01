@@ -106,7 +106,8 @@ fn launcher(ctx: &mut Ctx) {
 }
 
 fn main_command_line(ctx: &Ctx) -> String {
-    let app = ctx.main_app.clone().unwrap_or_default();
+    // The path gaP launches from: in `System32` it is the one that matches the application.
+    let app = ctx.io_path(&ctx.main_app.clone().unwrap_or_default());
     let mut cl = format!("\"{}\"", app);
     for part in [ctx.main_cmdline.as_str(), ctx.cmd_raw.as_str()] {
         if !part.is_empty() {

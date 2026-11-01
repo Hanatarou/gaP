@@ -96,9 +96,12 @@ fn arg(a: &[String], i: usize) -> &str {
     a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
 }
 
+/// Full path of an argument as gaP has to open it so that it means what it means to the
+/// main application (`System32` of the application, see `Ctx::io_path`).
 fn full(ctx: &mut Ctx, p: &str) -> String {
     let e = ctx.expand(p);
-    util::path_full(&e, &ctx.script_dir)
+    let f = util::path_full(&e, &ctx.script_dir);
+    ctx.io_path(&f)
 }
 
 fn default_settings_dir(ctx: &Ctx) -> String {
@@ -325,7 +328,13 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
 
 pub fn batch(ctx: &mut Ctx, args: &[String]) {
     use std::os::windows::process::CommandExt;
-    let f = full(ctx, arg(args, 0));
+    // `logical` goes to cmd.exe (it runs with the architecture of the application and
+    // resolves the path itself); gaP opens the file through `f`.
+    let logical = {
+        let e = ctx.expand(arg(args, 0));
+        util::path_full(&e, &ctx.script_dir)
+    };
+    let f = ctx.io_path(&logical);
     let mut show = ctx.expand(arg(args, 1));
     if is_null(&show) || show.is_empty() {
         show = "hide".into();
@@ -334,13 +343,13 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     let wd = util::parent_dir(&f);
-    let cmd = sys::system32("cmd.exe");
+    let cmd = sys::system32_for(ctx.app_arch, "cmd.exe");
     let mut c = std::process::Command::new(cmd);
     c.current_dir(&wd);
     if eq_ic(&show, "hide") {
-        c.raw_arg(format!("/C \"{}\"", f)).creation_flags(0x0800_0000);
+        c.raw_arg(format!("/C \"{}\"", logical)).creation_flags(0x0800_0000);
     } else if eq_ic(&show, "show") {
-        c.raw_arg(format!("/K \"{}\"", f));
+        c.raw_arg(format!("/K \"{}\"", logical));
     } else {
         return;
     }

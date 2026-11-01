@@ -598,3 +598,68 @@ pub fn unix_now() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+// ------------------------------------------------- System32 / WOW64 rewriting
+
+/// Subfolders of `System32` that WOW64 never redirects (Microsoft Learn, "File System
+/// Redirector"). A path inside them means the same to every process, so it is kept.
+const WOW64_NOT_REDIRECTED: &[&str] = &["catroot", "catroot2", "driverstore", "drivers\\etc", "logfiles", "spool"];
+
+/// Makes a path under `<windir>\System32` mean what it means to the main application, even
+/// when gaP has the other architecture (64-bit Windows only):
+/// gaP x86 + application x64 -> `Sysnative`; gaP x64 + application x86 -> `SysWOW64`.
+/// Any other combination, and any other path, is returned unchanged.
+pub fn rewrite_system32(p: &str, windir: &str, os: &str, gap: &str, app: &str) -> String {
+    if os != "x64" || gap == app {
+        return p.to_string();
+    }
+    let windir = windir.trim_end_matches('\\');
+    let prefix = format!("{}\\System32", windir);
+    let Some(head) = p.get(..prefix.len()) else { return p.to_string() };
+    if !head.eq_ignore_ascii_case(&prefix) {
+        return p.to_string();
+    }
+    let rest = &p[prefix.len()..];
+    if !(rest.is_empty() || rest.starts_with('\\')) {
+        return p.to_string();
+    }
+    let sub = rest.trim_start_matches('\\').to_lowercase();
+    if WOW64_NOT_REDIRECTED.iter().any(|d| sub == *d || sub.starts_with(&format!("{}\\", d))) {
+        return p.to_string();
+    }
+    let alias = if app == "x64" { "Sysnative" } else { "SysWOW64" };
+    format!("{}\\{}{}", windir, alias, rest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_system32 as rw;
+
+    const W: &str = r"C:\Windows";
+
+    #[test]
+    fn system32_follows_the_application() {
+        // gaP x86 + application x64: the real System32 is reached through Sysnative
+        assert_eq!(rw(r"C:\Windows\System32\notepad.exe", W, "x64", "x86", "x64"), r"C:\Windows\Sysnative\notepad.exe");
+        assert_eq!(rw(r"c:\windows\system32", W, "x64", "x86", "x64"), r"C:\Windows\Sysnative");
+        // gaP x64 + application x86: SysWOW64
+        assert_eq!(rw(r"C:\Windows\System32\cmd.exe", W, "x64", "x64", "x86"), r"C:\Windows\SysWOW64\cmd.exe");
+        // same architecture, or 32-bit Windows: nothing to do
+        assert_eq!(rw(r"C:\Windows\System32\cmd.exe", W, "x64", "x64", "x64"), r"C:\Windows\System32\cmd.exe");
+        assert_eq!(rw(r"C:\Windows\System32\cmd.exe", W, "x64", "x86", "x86"), r"C:\Windows\System32\cmd.exe");
+        assert_eq!(rw(r"C:\Windows\System32\cmd.exe", W, "x86", "x86", "x86"), r"C:\Windows\System32\cmd.exe");
+    }
+
+    #[test]
+    fn system32_rewrite_keeps_other_paths() {
+        assert_eq!(rw(r"C:\Windows\System32x\a.dll", W, "x64", "x64", "x86"), r"C:\Windows\System32x\a.dll");
+        assert_eq!(rw(r"C:\Program Files\App\System32\a.dll", W, "x64", "x64", "x86"), r"C:\Program Files\App\System32\a.dll");
+        assert_eq!(rw(r"D:\Windows\System32\a.dll", W, "x64", "x64", "x86"), r"D:\Windows\System32\a.dll");
+        assert_eq!(rw("C:", W, "x64", "x64", "x86"), "C:");
+        // folders that WOW64 does not redirect
+        assert_eq!(rw(r"C:\Windows\System32\drivers\etc\hosts", W, "x64", "x64", "x86"), r"C:\Windows\System32\drivers\etc\hosts");
+        assert_eq!(rw(r"C:\Windows\System32\spool", W, "x64", "x64", "x86"), r"C:\Windows\System32\spool");
+        // ...but their neighbours are
+        assert_eq!(rw(r"C:\Windows\System32\drivers\x.sys", W, "x64", "x64", "x86"), r"C:\Windows\SysWOW64\drivers\x.sys");
+    }
+}

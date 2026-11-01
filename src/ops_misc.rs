@@ -18,9 +18,16 @@ fn arg(a: &[String], i: usize) -> &str {
     a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
 }
 
-fn full(ctx: &mut Ctx, p: &str) -> String {
+/// Full path, as written (what other programs and links must receive).
+fn full_logical(ctx: &mut Ctx, p: &str) -> String {
     let e = ctx.expand(p);
     util::path_full(&e, &ctx.script_dir)
+}
+
+/// Full path as gaP has to open it so that it means what it means to the main application.
+fn full(ctx: &mut Ctx, p: &str) -> String {
+    let f = full_logical(ctx, p);
+    ctx.io_path(&f)
 }
 
 pub fn clip(ctx: &mut Ctx, args: &[String]) {
@@ -179,15 +186,17 @@ pub fn quit(ctx: &mut Ctx, args: &[String]) {
 }
 
 pub fn regdll(ctx: &mut Ctx, args: &[String]) {
-    let file = full(ctx, arg(args, 0));
+    // regsvr32 runs with the architecture of the application, so it registers the DLL
+    // in the registry view of the application and resolves the path itself.
+    let file = full_logical(ctx, arg(args, 0));
     let mut flag = ctx.expand(arg(args, 1));
     if flag == NULL || flag.is_empty() {
         flag = "register".into();
     }
-    if !util::is_file(&file) {
+    if !util::is_file(&ctx.io_path(&file)) {
         return;
     }
-    let exe = sys::system32("regsvr32.exe");
+    let exe = sys::system32_for(ctx.app_arch, "regsvr32.exe");
     if eq_ic(&flag, "register") {
         sys::run_hidden_wait(&exe, &["/S", &file]);
     } else if eq_ic(&flag, "unregister") {
@@ -268,8 +277,8 @@ pub fn service(ctx: &mut Ctx, args: &[String]) {
 
 pub fn symlink(ctx: &mut Ctx, args: &[String]) {
     let flag = if args.len() > 2 { args[2].clone() } else { "Create".to_string() };
-    let link = full(ctx, arg(args, 0));
-    let target = full(ctx, arg(args, 1));
+    let link = full_logical(ctx, arg(args, 0));
+    let target = full_logical(ctx, arg(args, 1));
     if eq_ic(&flag, "remove") {
         let is_dir = args.get(3).map(|s| s.trim() != "0").unwrap_or(true);
         remove_symlink(&link, is_dir);

@@ -73,8 +73,28 @@ pub fn java_major(v: &str) -> Option<u32> {
     }
 }
 
-pub fn java_info() -> JavaInfo {
-    let views: Vec<View> = if sys::os_arch() == "x64" { vec![View::X64, View::X86] } else { vec![View::Native] };
+/// Registry views where the Java Runtime Environments are looked for.
+fn all_views() -> Vec<View> {
+    if sys::os_arch() == "x64" {
+        vec![View::X64, View::X86]
+    } else {
+        vec![View::Native]
+    }
+}
+
+/// The registry view of the main application: a 32-bit application uses the 32-bit
+/// Java/.NET, a 64-bit one the 64-bit Java/.NET.
+fn app_view(ctx: &Ctx) -> View {
+    if ctx.os_arch != "x64" {
+        View::Native
+    } else if ctx.app_arch == "x64" {
+        View::X64
+    } else {
+        View::X86
+    }
+}
+
+pub fn java_info(views: &[View]) -> JavaInfo {
     let roots = [
         "HKLM\\SOFTWARE\\JavaSoft\\Java Runtime Environment",
         "HKLM\\SOFTWARE\\JavaSoft\\JRE",
@@ -99,7 +119,7 @@ pub fn java_info() -> JavaInfo {
         }
         None
     };
-    for v in &views {
+    for v in views {
         for root in roots {
             let cur = reg::read_string(root, "CurrentVersion", *v);
             if let Some(c) = &cur {
@@ -139,7 +159,8 @@ pub fn java_info() -> JavaInfo {
 }
 
 pub fn java_early(ctx: &mut Ctx) {
-    let info = java_info();
+    // Runs before the main application is chosen (`{JAVAEXE}` can be used in `application`).
+    let info = java_info(&all_views());
     let exe = info.exe.unwrap_or_else(|| "There is no Java Runtime Environment installed.".to_string());
     ctx.add_var("JAVAEXE", &exe);
 }
@@ -151,7 +172,7 @@ pub fn java_full(ctx: &mut Ctx) {
     }
     let exit = req.contains('!');
     let req = req.replace('!', "");
-    let info = java_info();
+    let info = java_info(&[app_view(ctx)]);
     let ok = java_major(&req).map(|m| info.majors.contains(&m)).unwrap_or(false);
     if !ok {
         ctx.msg(&format!("The main application requires Java Runtime Environment version {} to run.", req));
@@ -186,14 +207,20 @@ pub fn main_app_init(ctx: &mut Ctx) {
         }
     }
     let pick = |ctx: &Ctx, s: &str| util::path_full(s, &ctx.script_dir);
+    // The 1st segment is the x86 application and the 2nd one is the x64 application, so the
+    // architecture of the application is the architecture of the segment that was chosen.
+    // Existence is checked as that application sees the path (System32 vs SysWOW64).
+    let exists_as = |arch: &str, p: &str| util::exists(&sys::io_path(arch, p));
     let chosen;
+    let mut app_arch = "x86";
     if ctx.os_arch == "x64" && segs.len() >= 2 {
         let p64 = pick(ctx, &segs[1]);
-        if util::exists(&p64) {
+        if exists_as("x64", &p64) {
             chosen = p64;
+            app_arch = "x64";
         } else {
             let p86 = pick(ctx, &segs[0]);
-            if util::exists(&p86) {
+            if exists_as("x86", &p86) {
                 chosen = p86;
             } else {
                 ctx.msg("The main application (x86) path and (x64) path are invalid.");
@@ -202,7 +229,7 @@ pub fn main_app_init(ctx: &mut Ctx) {
         }
     } else {
         let p86 = pick(ctx, &segs[0]);
-        if util::exists(&p86) {
+        if exists_as("x86", &p86) {
             chosen = p86;
         } else {
             ctx.msg("The main application (x86) path is invalid.");
@@ -210,6 +237,7 @@ pub fn main_app_init(ctx: &mut Ctx) {
         }
     }
     let exepath = chosen.rfind('\\').map(|i| chosen[..i].to_string()).unwrap_or_default();
+    ctx.app_arch = app_arch;
     ctx.add_var("APPEXE", &chosen);
     ctx.add_var("EXEPATH", &exepath);
     clean::set_main_app(&chosen);
@@ -388,9 +416,8 @@ const NET_RELEASES: &[(u32, &str)] = &[
     (394802, "4.6.2"), (394254, "4.6.1"), (393295, "4.6"), (379893, "4.5.2"), (378675, "4.5.1"), (378389, "4.5"),
 ];
 
-pub fn dotnet_versions() -> Vec<String> {
+pub fn dotnet_versions(view: View) -> Vec<String> {
     let ndp = "HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP";
-    let view = if sys::os_arch() == "x64" { View::X64 } else { View::Native };
     let mut out: Vec<String> = Vec::new();
     for k in reg::enum_subkeys(ndp, view) {
         // "v3.5" / "v2.0.50727" -> "3.5" / "2.0"
@@ -419,7 +446,7 @@ pub fn dotnet_init(ctx: &mut Ctx) {
     }
     let exit = req.contains('!');
     let req = req.replace('!', "");
-    let inst = dotnet_versions();
+    let inst = dotnet_versions(app_view(ctx));
     let ok = inst.iter().any(|v| v == &req) || (req.starts_with("4.") && inst.iter().any(|v| v.starts_with("4.") && ver_ge(v, &req)));
     if !ok {
         ctx.msg(&format!("The main application requires .NET Framework version {} to run.", req));

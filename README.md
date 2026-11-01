@@ -24,7 +24,7 @@ For everyone else: bug reports and PRs are evaluated on their merits (does it wo
 
 ## 🙏 Credits: yaP
 
-gaP is based on **yaP** by **tproli** (Roland Toth). I (Bruno Eduardo, known as **Aeolis** in the forums) created gaP in AutoIt in 2015; this repository is the **Rust port** of it: the same ini format, the same keywords, the same macros and the same text encryption, so a launcher configuration written for the AutoIt gaP keeps working. The last AutoIt version was 1.1.5.0; the Rust port starts at 2.0.0.0. My thanks go to everyone at The Portable Freeware Collection forums who tested and discussed it.
+gaP is based on **yaP** by **tproli** (Roland Toth). I (Bruno Eduardo, known as **Aeolis** on the PortableFreeware forum) created gaP in AutoIt in 2015; this repository is the **Rust port** of it: the same ini format, the same keywords, the same macros and the same text encryption, so a launcher configuration written for the AutoIt gaP keeps working. The last AutoIt version was 1.1.5.0; the Rust port starts at 2.0.0.0. My thanks go to everyone at The Portable Freeware Collection forums who tested and discussed it.
 
 - **gaP forum topic:** http://www.portablefreeware.com/forums/viewtopic.php?f=11&t=22129
 - **yaP:** http://rolandtoth.hu/yaP/
@@ -35,7 +35,7 @@ gaP is a universal DIY (Do It Yourself) launcher for making **portable applicati
 
 - ✅ One small executable, no installer, no runtime to install (the C runtime is linked statically)
 - ✅ Settings in a plain `.ini` next to the launcher: `MyAppPortable.exe` reads `MyAppPortable.ini`
-- ✅ 64-bit and 32-bit builds; the application that is launched is chosen by the architecture of Windows (`application = App_x86.exe :: App_x64.exe`)
+- ✅ 64-bit and 32-bit builds that read the same `.ini`; the application that is launched is chosen by the architecture of Windows (`application = App_x86.exe :: App_x64.exe`)
 - ✅ Does not need administrator rights unless the portabilized application does (`!admin`)
 
 What it can do:
@@ -65,7 +65,7 @@ There is no installer. Download the zip of your architecture from the [releases]
 | `gaP-v2.0.0.0-windows-x64.zip` | 64-bit Windows |
 | `gaP-v2.0.0.0-windows-x86.zip` | 32-bit and 64-bit Windows |
 
-(`v2.0.0.0` is the version; each zip has its `gaP-v2.0.0.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`.
+(`v2.0.0.0` is the version; each zip has its `gaP-v2.0.0.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`. What depends on the architecture is the **application**, not the build of gaP: the first segment of `application` is the x86 application and the second one is the x64 application (use `NULL` as the first segment for an application that exists only as x64). The `System32` folder in paths, `regsvr32` and `cmd.exe` (`regdll`, `batch`) and the Java/.NET check (`!java`, `!dotnet`) follow the application that was launched. To change from one build to the other, replace `gaP.exe` and keep its name: the `.ini` has the same name.
 
 ### Requirements
 - Windows 10 or later (a limit of the Rust standard library, not of gaP itself). The C runtime is linked statically: nothing to install.
