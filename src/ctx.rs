@@ -7,7 +7,7 @@ use crate::ini::IniDoc;
 use crate::{crypto, ipc, reg, sys, ui, util};
 
 pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
-pub const PROGRAM_VERSION: &str = "2.0.0.0";
+pub const PROGRAM_VERSION: &str = "2.1.0.0";
 
 /// Names of the shell folders accepted as `%Name%` (order of the original).
 /// (name, fallback CSIDL, is_HKLM)
