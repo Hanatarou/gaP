@@ -5,27 +5,25 @@
 use crate::ctx::{exit_code, Ctx, EXIT_CANCELLED, EXIT_CONFIG, FUNC_MACROS, SHELL_FOLDERS};
 use crate::{checks, crypto, sys, ui, util};
 
-/// Looks for unescaped `open … close` (a delimiter right after a '<' is escaped).
-/// Returns (start, end_exclusive, inner content), the positions in bytes. `{`, `}` and `<` are ASCII, so
-/// scanning the bytes is enough and the text is never decoded.
-fn find_braced(s: &str, depth: usize) -> Option<(usize, usize, String)> {
+/// The smallest macro of the text: the first `}` that closes a `{`, and the nearest `{` before it, so there is no
+/// other macro inside. Returns the positions (in bytes) of both. A delimiter right after a '<' is escaped, and a `}`
+/// with no `{` before it is just text. `{`, `}` and `<` are ASCII, so scanning the bytes is enough.
+fn innermost(s: &str) -> Option<(usize, usize)> {
     let b = s.as_bytes();
-    let n = b.len();
-    let unescaped = |i: usize| -> bool { i == 0 || b[i - 1] != b'<' };
-    let run = |i: usize, c: u8| -> bool { b[i..i + depth].iter().all(|&x| x == c) };
-    let mut i = 0;
-    while i + depth <= n {
-        if run(i, b'{') && unescaped(i) {
-            let mut j = i + depth;
-            while j + depth <= n {
-                if run(j, b'}') && unescaped(j) {
-                    return Some((i, j + depth, s[i + depth..j].to_string()));
-                }
-                j += 1;
-            }
-            return None;
+    let mut open = None;
+    for i in 0..b.len() {
+        if i > 0 && b[i - 1] == b'<' {
+            continue;
         }
-        i += 1;
+        match b[i] {
+            b'{' => open = Some(i),
+            b'}' => {
+                if let Some(o) = open {
+                    return Some((o, i));
+                }
+            }
+            _ => {}
+        }
     }
     None
 }
@@ -89,6 +87,45 @@ pub fn undefined_env_names(s: &str) -> Vec<String> {
         }
     }
     found
+}
+
+/// Stand-ins (Unicode private use) for the characters of a value that the macro syntax would read.
+const LT: char = '\u{E002}';
+const OPEN: char = '\u{E000}';
+const CLOSE: char = '\u{E001}';
+
+/// A value goes into the text with `<`, `{` and `}` replaced, so nothing in it can be taken for a macro or for an
+/// escape, whatever it is (a CLSID in the command line, the text of the clipboard, a `<` at its end).
+fn neutralize(v: &str) -> String {
+    v.replace('<', &LT.to_string()).replace('{', &OPEN.to_string()).replace('}', &CLOSE.to_string())
+}
+
+/// The final text: the escapes `<{` and `<}` become `{` and `}`, and the stand-ins of the values become what they were.
+fn restore(s: &str) -> String {
+    unescape(s).replace(LT, "<").replace(OPEN, "{").replace(CLOSE, "}")
+}
+
+/// Replaces `{{NAME}}` (the value with doubled backslashes) and `{NAME}`: the smallest macro first, again and again, so
+/// a macro can be inside the name of another one (`{PREFIX_{LANGCODE}}`). The text is never read again beyond that:
+/// a value goes in with its braces neutralized, so each step takes one macro out and none comes in, and the loop
+/// always ends. An undefined name is reported by the caller. `Err` = (the text up to the problem, the name).
+fn expand_macros(s: &str, mut lookup: impl FnMut(&str) -> Option<String>) -> Result<String, (String, String)> {
+    let mut s = s.to_string();
+    while let Some((a, b)) = innermost(&s) {
+        let t = s.as_bytes();
+        // `{{NAME}}`: the macro is wrapped by one more pair of unescaped braces
+        let doubled = a > 0 && t.get(b + 1) == Some(&b'}') && t[a - 1] == b'{' && (a == 1 || t[a - 2] != b'<');
+        let (from, to) = if doubled { (a - 1, b + 2) } else { (a, b + 1) };
+        let name = unescape(&s[a + 1..b]);
+        match lookup(&name) {
+            Some(v) => {
+                let v = neutralize(&v);
+                s.replace_range(from..to, &if doubled { v.replace('\\', "\\\\") } else { v });
+            }
+            None => return Err((restore(&s), name)),
+        }
+    }
+    Ok(restore(&s))
 }
 
 impl Ctx {
@@ -175,54 +212,26 @@ impl Ctx {
     /// (HKLM64 -> HKLM), the old flag `2`.
     pub fn expand_ex(&mut self, input: &str, reg_key: bool) -> String {
         let mut s = input.to_string();
-        let mut guard = 0;
-        loop {
-            guard += 1;
-            if guard > 500 {
-                self.msg("Macro expansion limit reached (possible recursive variable).");
-                break;
-            }
-            // 1) encrypted text
-            if let Some(a) = s.find(crypto::MARK) {
-                let from = a + crypto::MARK.len();
-                if let Some(b) = s[from..].find(crypto::MARK) {
-                    let end = from + b + crypto::MARK.len();
-                    let token = s[a..end].to_string();
-                    let plain = self.decrypt_token(&token);
-                    s.replace_range(a..end, &plain);
-                    continue;
-                }
-            }
-            // 2) {{VAR}}: value with doubled '\'
-            if let Some((a, b, inner)) = find_braced(&s, 2) {
-                let name = unescape(&inner);
-                match self.lookup_macro(&name) {
-                    Some(v) => {
-                        s.replace_range(a..b, &v.replace('\\', "\\\\"));
-                        continue;
-                    }
-                    None => {
-                        self.msg(&format!("The \"{}\" variable isn't defined and can't be used.", name));
-                        return s;
-                    }
-                }
-            }
-            // 3) {VAR}
-            if let Some((a, b, inner)) = find_braced(&s, 1) {
-                let name = unescape(&inner);
-                match self.lookup_macro(&name) {
-                    Some(v) => {
-                        s.replace_range(a..b, &v);
-                        continue;
-                    }
-                    None => {
-                        self.msg(&format!("The \"{}\" variable isn't defined and can't be used.", name));
-                        return s;
-                    }
-                }
-            }
-            break;
+        // 1) encrypted text: the decrypted text takes the place of the token and is expanded with the rest of the
+        // text, but it is not searched for tokens again
+        let mut pos = 0;
+        while let Some(a) = s[pos..].find(crypto::MARK).map(|a| a + pos) {
+            let from = a + crypto::MARK.len();
+            let Some(b) = s[from..].find(crypto::MARK) else { break };
+            let end = from + b + crypto::MARK.len();
+            let token = s[a..end].to_string();
+            let plain = self.decrypt_token(&token);
+            s.replace_range(a..end, &plain);
+            pos = a + plain.len();
         }
+        // 2) `{{VAR}}`, `{VAR}` and the escapes `<{` `<}`: the values are put in as they are (see `expand_macros`)
+        s = match expand_macros(&s, |name| self.lookup_macro(name)) {
+            Ok(t) => t,
+            Err((partial, name)) => {
+                self.msg(&format!("The \"{}\" variable isn't defined and can't be used.", name));
+                return partial;
+            }
+        };
         // shell folders and environment variables; a folder is read from the system only if it is used
         if s.contains('%') {
             for (i, (name, _, _)) in SHELL_FOLDERS.iter().enumerate() {
@@ -248,7 +257,7 @@ impl Ctx {
                 s = s.replacen(&first, &first[..first.len() - 2], 1);
             }
         }
-        unescape(&s)
+        s
     }
 
     pub fn expand(&mut self, input: &str) -> String {
@@ -267,14 +276,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn braces_escape() {
-        assert_eq!(find_braced("a {X} b", 1).map(|t| t.2), Some("X".to_string()));
-        assert!(find_braced("a <{X<} b", 1).is_none());
+    fn smallest_macro() {
+        assert_eq!(innermost("a {X} b"), Some((2, 4)));
+        assert_eq!(innermost("{A{B}}"), Some((2, 4)));
+        assert_eq!(innermost("} {A}"), Some((2, 4))); // a `}` with no `{` is text
+        assert_eq!(innermost("a < {X} b"), Some((4, 6)));
+        assert_eq!(innermost("{open"), None);
+        assert_eq!(innermost("a <{X<} b"), None);
         // only "<{" and "<}" escape; the old "<<" is not special any more
-        assert!(find_braced("a <<{X} b", 1).is_none());
-        assert_eq!(find_braced("a < {X} b", 1).map(|t| t.2), Some("X".to_string()));
-        assert_eq!(find_braced("{{A}}", 2).map(|t| t.2), Some("A".to_string()));
+        assert_eq!(innermost("a <<{X} b"), None);
         assert_eq!(unescape("<{x<}<<"), "{x}<<");
+    }
+
+    fn lookup(name: &str) -> Option<String> {
+        match name {
+            "ROOT" => Some(r"D:\Apps".to_string()),
+            // values with braces and escapes in them: they have to come out as they are
+            "PARAMETERS" => Some("::{20D04FE0-3AEA-1069-A2D8-08002B30309D} <{x<}".to_string()),
+            "X" => Some("x".to_string()),
+            "LANG" => Some("pt".to_string()),
+            "PREFIX_pt" => Some("ola".to_string()),
+            "LT" => Some("a<".to_string()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn macro_values_are_not_expanded_again() {
+        assert_eq!(
+            expand_macros("run {PARAMETERS}", lookup).as_deref(),
+            Ok("run ::{20D04FE0-3AEA-1069-A2D8-08002B30309D} <{x<}")
+        );
+    }
+
+    #[test]
+    fn macros_and_escapes() {
+        assert_eq!(expand_macros(r"{ROOT}\{X}.exe", lookup).as_deref(), Ok(r"D:\Apps\x.exe"));
+        assert_eq!(expand_macros(r"{{ROOT}}\{X}", lookup).as_deref(), Ok(r"D:\\Apps\x"));
+        assert_eq!(expand_macros("{X}{{X}}{X}", lookup).as_deref(), Ok("xxx"));
+        // the escapes of the text around the macros are removed, an unclosed brace stays
+        assert_eq!(expand_macros("<{literal<} {X} {open", lookup).as_deref(), Ok("{literal} x {open"));
+        assert_eq!(expand_macros("plain", lookup).as_deref(), Ok("plain"));
+    }
+
+    #[test]
+    fn a_macro_inside_the_name_of_another() {
+        assert_eq!(expand_macros("{PREFIX_{LANG}}!", lookup).as_deref(), Ok("ola!"));
+        assert_eq!(expand_macros(r"{{ROOT}}\{PREFIX_{LANG}}", lookup).as_deref(), Ok(r"D:\\Apps\ola"));
+        // a name made with a macro that is not defined is reported with the name that came out
+        assert_eq!(
+            expand_macros("{PREFIX_{X}}", lookup),
+            Err(("{PREFIX_x}".to_string(), "PREFIX_x".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_value_can_not_change_what_comes_after_it() {
+        // a "<" at the end of a value must not escape the "{" that follows it
+        assert_eq!(expand_macros("{LT}{X}", lookup).as_deref(), Ok("a<x"));
+        assert_eq!(expand_macros("{LT}<{X<}", lookup).as_deref(), Ok("a<{X}"));
+    }
+
+    #[test]
+    fn undefined_macro_is_reported_with_the_text_before_it() {
+        assert_eq!(
+            expand_macros("a {X} b {NOPE} c", lookup),
+            Err(("a x b {NOPE} c".to_string(), "NOPE".to_string()))
+        );
     }
 
     #[test]

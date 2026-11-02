@@ -2,7 +2,7 @@
 //! regkey, regvalue, (regkey), (regvalue), ->regkey, <-regkey, ->regvalue,
 //! <-regvalue, +regkey, +regvalue, -regkey, -regvalue, regexport, regimport.
 
-use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND};
 
 use crate::ctx::{Ctx, Prog};
 use crate::reg::{self, View};
@@ -19,16 +19,18 @@ fn key_of(ctx: &mut Ctx, s: &str) -> String {
     ctx.expand_ex(s, true).trim_end_matches('\\').to_string()
 }
 
-/// Message for a registry change that failed (usually a key under HKLM without administrator rights).
-fn change_failed(ctx: &Ctx, text: &str) {
-    if sys::is_admin() {
-        ctx.msg(text);
-    } else {
-        ctx.msg(&format!(
-            "{} Administrator rights may be required. Please, set \"!admin = 1\" in the [GENERAL] section and try again.",
-            text
-        ));
+/// Message for a registry change that failed. `code` is the system error: it is shown with its text, and the
+/// hint about `!admin` only when the error is "access denied" and gaP is not running as administrator (usually a
+/// key under HKLM). Without a code (reg.exe gave none) the hint is shown whenever gaP is not an administrator.
+fn change_failed(ctx: &Ctx, text: &str, code: Option<u32>) {
+    let mut m = text.to_string();
+    if let Some(c) = code {
+        m.push_str(&format!(" {}.", std::io::Error::from_raw_os_error(c as i32)));
     }
+    if code.is_none_or(|c| c == ERROR_ACCESS_DENIED) && !sys::is_admin() {
+        m.push_str(" Administrator rights may be required. Please, set \"!admin = 1\" in the [GENERAL] section and try again.");
+    }
+    ctx.msg(&m);
 }
 
 /// "HKCU\Software\K\Value" -> ("HKCU\Software\K", "Value").
@@ -66,14 +68,18 @@ pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
     }
     match reg::copy_tree(src, tgt, view) {
         Ok(()) => {
-            if mv && !reg::delete_tree(src, view) {
-                change_failed(ctx, &format!("The registry key \"{}\" was copied but could not be removed.", src));
+            if mv {
+                if let Err(code) = reg::delete_tree(src, view) {
+                    let t = format!("The registry key \"{}\" was copied but could not be removed.", src);
+                    change_failed(ctx, &t, Some(code));
+                }
             }
         }
         Err(ERROR_FILE_NOT_FOUND) => {}
         Err(code) => {
             ctx.log_err(&format!("copy registry key \"{}\"", src), &format!("error {}", code));
-            change_failed(ctx, &format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt));
+            let t = format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt);
+            change_failed(ctx, &t, Some(code));
         }
     }
 }
@@ -85,10 +91,14 @@ pub fn copy_value(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
     let (sk, sv) = split_value(src);
     let (tk, tv) = split_value(tgt);
     let Some(v) = reg::read_value(&sk, &sv, view) else { return };
-    if !reg::write_value(&tk, &tv, v.kind, &v.data, view) {
-        change_failed(ctx, &format!("The registry value \"{}\" could not be copied to \"{}\".", src, tgt));
-    } else if mv && !reg::delete_value(&sk, &sv, view) {
-        change_failed(ctx, &format!("The registry value \"{}\" was copied but could not be removed.", src));
+    if let Err(code) = reg::write_value(&tk, &tv, v.kind, &v.data, view) {
+        let t = format!("The registry value \"{}\" could not be copied to \"{}\".", src, tgt);
+        change_failed(ctx, &t, Some(code));
+    } else if mv {
+        if let Err(code) = reg::delete_value(&sk, &sv, view) {
+            let t = format!("The registry value \"{}\" was copied but could not be removed.", src);
+            change_failed(ctx, &t, Some(code));
+        }
     }
 }
 
@@ -121,8 +131,8 @@ pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
 pub fn plus_regkey(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
-    if !reg::create_key(&k, view) {
-        change_failed(ctx, &format!("The registry key \"{}\" could not be created.", k));
+    if let Err(code) = reg::create_key(&k, view) {
+        change_failed(ctx, &format!("The registry key \"{}\" could not be created.", k), Some(code));
     }
 }
 
@@ -138,8 +148,9 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 5));
     match reg::build_value(&kind, &data, &sep) {
         Some((t, bytes)) => {
-            if !reg::write_value(&key, &name, t, &bytes, view) {
-                change_failed(ctx, &format!("The registry value \"{}\\{}\" could not be written.", key, name));
+            if let Err(code) = reg::write_value(&key, &name, t, &bytes, view) {
+                let text = format!("The registry value \"{}\\{}\" could not be written.", key, name);
+                change_failed(ctx, &text, Some(code));
             }
         }
         None => ctx.msg(&format!("The value \"{}\" can't be converted to the type \"{}\".", data, kind)),
@@ -156,8 +167,12 @@ pub fn minus_regkey(ctx: &mut Ctx, args: &[String]) {
 /// Deletes the key (`if_empty`: only if it has no values and no subkeys). A key that is not there is not an error.
 pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
     let st = if if_empty { reg::key_state(key, view) } else { 1 };
-    if st > 0 && (!if_empty || st == 2) && !reg::delete_tree(key, view) && reg::key_exists(key, view) {
-        ctx.log(&format!("ERROR delete registry key \"{}\"", key));
+    if st > 0 && (!if_empty || st == 2) {
+        if let Err(code) = reg::delete_tree(key, view) {
+            if reg::key_exists(key, view) {
+                ctx.log(&format!("ERROR delete registry key \"{}\" (error {})", key, code));
+            }
+        }
     }
 }
 
@@ -165,8 +180,10 @@ pub fn minus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let name = ctx.expand(arg(args, 1));
     let view = view_of(ctx, arg(args, 2));
-    if !reg::delete_value(&k, &name, view) && reg::value_exists(&k, &name, view) {
-        ctx.log(&format!("ERROR delete registry value \"{}\\{}\"", k, name));
+    if let Err(code) = reg::delete_value(&k, &name, view) {
+        if reg::value_exists(&k, &name, view) {
+            ctx.log(&format!("ERROR delete registry value \"{}\\{}\" (error {})", k, name, code));
+        }
     }
 }
 
@@ -235,8 +252,10 @@ pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
         Prog::RegExport { key, file, view } => export_to(ctx, key, file, *view),
         Prog::MinusRegKey { key, if_empty, view } => delete_key(ctx, key, *if_empty, *view),
         Prog::MinusRegValue { key, name, view } => {
-            if !reg::delete_value(key, name, *view) && reg::value_exists(key, name, *view) {
-                ctx.log(&format!("ERROR delete registry value \"{}\\{}\"", key, name));
+            if let Err(code) = reg::delete_value(key, name, *view) {
+                if reg::value_exists(key, name, *view) {
+                    ctx.log(&format!("ERROR delete registry value \"{}\\{}\" (error {})", key, name, code));
+                }
             }
         }
         Prog::LtrRegKey { src, tgt, mv, view } => copy_key(ctx, src, tgt, *mv, *view),
@@ -263,7 +282,7 @@ pub fn import_file(file: &str, view: View) -> bool {
 
 fn import_or_warn(ctx: &Ctx, file: &str, view: View) {
     if !import_file(file, view) {
-        change_failed(ctx, &format!("The registry file \"{}\" could not be imported.", file));
+        change_failed(ctx, &format!("The registry file \"{}\" could not be imported.", file), None);
     }
 }
 

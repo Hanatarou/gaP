@@ -78,12 +78,19 @@ pub fn giniread(ctx: &mut Ctx, args: &[String]) {
     let sec = ctx.expand(arg(args, 1));
     let key = ctx.expand(arg(args, 2));
     let var = ctx.expand(arg(args, 3));
+    // Optional 5th segment "expand": the value read is text of the gaP world and its macros are expanded once.
+    // Without it the value is data from another file and is kept as it is.
+    let expand = eq_ic(&ctx.expand(arg(args, 4)), "expand");
     if !util::is_file(&file) {
         return;
     }
     let doc = IniDoc::load(&file);
     let section = if is_null(&sec) { None } else { Some(sec.as_str()) };
-    let val = doc.get(section, &key).unwrap_or_else(|| "NOT_FOUND!".to_string());
+    let val = match doc.get(section, &key) {
+        Some(v) if expand => ctx.expand(&v),
+        Some(v) => v,
+        None => "NOT_FOUND!".to_string(),
+    };
     set_user_var(ctx, &var, &val);
 }
 

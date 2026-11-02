@@ -1091,18 +1091,22 @@ Read a value from an ini file and save it to an user variable.
 
 Syntax:
 
-iniread = Ini file path :: Ini section :: Ini section key :: User variable name to store the value
+iniread = Ini file path :: Ini section :: Ini section key :: User variable name to store the value [:: expand]
 
 Examples:
 
 iniread = File.ini :: SETTINGS :: Lang :: MyVar            ; read "Lang" key value to variable "MyVar"
 iniread = File.ini :: NULL :: Lang :: MyVar                ; read "Lang" key value to "MyVar" (no section)
+iniread = File.ini :: SETTINGS :: Dir :: MyVar :: expand   ; the value of "Dir" may have gaP macros, eg. {GAPROOT}\Data
 
 Notes:
 
 * Leave the Section segment empty to read a key that is
-  outside a section; and
-* The new variable can be used as "{MyVar}" later on.
+  outside a section;
+* The new variable can be used as "{MyVar}" later on; and
+* The value is kept exactly as it is in the file, so "{" and "}" in it are
+  just text. Add the optional segment "expand" if the value has gaP macros
+  and they have to be expanded (once, when the value is read).
 
 [iniwrite]
 Description:
@@ -1494,6 +1498,13 @@ Notes:
 * Adding a user variable with the same name will overwrite existing.
 
 [Variables and macros]
+
+The smallest macro is replaced first, so a macro can be inside the name of
+another one, eg. "{PREFIX_{LANGCODE}}". A macro is replaced by its value once,
+and the value is never searched for macros again. Text that comes from outside the gaP ini (clipboard, dialogs,
+the command line, files read with "iniread") is kept as it is, even if it has
+"{" and "}" in it. The value of a "uservar" is written in the gaP ini, so its
+macros are expanded when the variable is defined.
 
 [Path macros]
 

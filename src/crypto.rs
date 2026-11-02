@@ -41,16 +41,17 @@ pub fn to_hex(b: &[u8]) -> String {
     s
 }
 
+/// Hexadecimal text (with or without "0x") as bytes. `None` = odd length or a character that is not a hex digit,
+/// whatever it is: the text is read byte by byte, never cut in the middle of a character.
 pub fn from_hex(s: &str) -> Option<Vec<u8>> {
     let t = s.trim();
     let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
-    if !t.len().is_multiple_of(2) {
+    let nibble = |c: u8| -> Option<u8> { (c as char).to_digit(16).map(|d| d as u8) };
+    let (pairs, rest) = t.as_bytes().as_chunks::<2>();
+    if !rest.is_empty() {
         return None;
     }
-    (0..t.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&t[i..i + 2], 16).ok())
-        .collect()
+    pairs.iter().map(|&[hi, lo]| Some(nibble(hi)? << 4 | nibble(lo)?)).collect()
 }
 
 /// Encrypts and returns `!@@!0x…!@@!`.
@@ -106,6 +107,20 @@ mod tests {
         assert!(e.starts_with("!@@!0x") && e.ends_with("!@@!"));
         assert_eq!(decrypt(&e, "secret").as_deref(), Some("Hello, café 123"));
         assert!(decrypt(&e, "wrong").is_none() || decrypt(&e, "wrong").as_deref() != Some("Hello, café 123"));
+    }
+
+    #[test]
+    fn from_hex_is_strict_and_never_panics() {
+        assert_eq!(from_hex("0x0aFf"), Some(vec![0x0A, 0xFF]));
+        assert_eq!(from_hex("  0X00 "), Some(vec![0]));
+        assert_eq!(from_hex(""), Some(vec![]));
+        assert_eq!(from_hex("abc"), None); // odd length
+        assert_eq!(from_hex("zz"), None);
+        assert_eq!(from_hex("+f"), None); // from_str_radix would take the sign
+        // not ASCII: before, this cut a character in the middle and panicked
+        assert_eq!(from_hex("ação"), None);
+        assert_eq!(from_hex("é1"), None);
+        assert!(decrypt("!@@!0xção!@@!", "x").is_none());
     }
 
     #[test]

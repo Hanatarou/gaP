@@ -7,7 +7,7 @@ use crate::ini::IniDoc;
 use crate::{crypto, ipc, reg, sys, ui, util};
 
 pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
-pub const PROGRAM_VERSION: &str = "2.1.0.0";
+pub const PROGRAM_VERSION: &str = "2.1.1.0";
 
 /// Names of the shell folders accepted as `%Name%` (order of the original).
 /// (name, fallback CSIDL, is_HKLM)
@@ -298,6 +298,7 @@ pub const EXIT_CONFIG: i32 = 2; // the .ini or the path of the main application 
 pub const EXIT_REQUIREMENT: i32 = 3; // a requirement of the main application is not met (administrator, OS, Java...)
 pub const EXIT_CANCELLED: i32 = 4; // the user cancelled a question or a password
 pub const EXIT_RUNNING: i32 = 5; // another instance is already running
+pub const EXIT_NOT_DELIVERED: i32 = 6; // the running instance did not receive the command line of this one
 
 /// `Exit`: quits without additional cleanup (as in AutoIt), with code 0.
 pub fn exit_now() -> ! {

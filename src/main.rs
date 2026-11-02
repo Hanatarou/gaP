@@ -1,5 +1,5 @@
 //! gaP: great! another Portabilizer — Rust port of the AutoIt program
-//! (v2.1.0.0; the last AutoIt version was 1.1.5.0).
+//! (v2.1.1.0; the last AutoIt version was 1.1.5.0).
 #![windows_subsystem = "windows"]
 #![allow(clippy::too_many_arguments)]
 

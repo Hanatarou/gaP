@@ -62,10 +62,10 @@ There is no installer. Download the zip of your architecture from the [releases]
 
 | Download | For |
 |---|---|
-| `gaP-v2.1.0.0-windows-x64.zip` | 64-bit Windows |
-| `gaP-v2.1.0.0-windows-x86.zip` | 32-bit and 64-bit Windows |
+| `gaP-v2.1.1.0-windows-x64.zip` | 64-bit Windows |
+| `gaP-v2.1.1.0-windows-x86.zip` | 32-bit and 64-bit Windows |
 
-(`v2.1.0.0` is the version; each zip has its `gaP-v2.1.0.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`.
+(`v2.1.1.0` is the version; each zip has its `gaP-v2.1.1.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`.
 
 ### x86 and x64
 
@@ -125,7 +125,7 @@ regkey = HKLM\Software\MyApp :: Data\settings.reg :: x64
 
 Other command lines given while gaP is already running are not started as a second copy: they are sent to the running one through a named pipe (only reachable by the same user and never over the network), and that copy hands them to the application.
 
-Exit codes of `gaP.exe`: `0` ok, `2` the `.ini` or the path of the main application is wrong, `3` a requirement of the application is not met (administrator, OS, Java...), `4` the user cancelled a question or a password, `5` another instance is already running.
+Exit codes of `gaP.exe`: `0` ok, `2` the `.ini` or the path of the main application is wrong, `3` a requirement of the application is not met (administrator, OS, Java...), `4` the user cancelled a question or a password, `5` another instance is already running, `6` the running instance did not receive the command line of this one (`!multiple = 1` or `0`).
 
 ### Keywords
 
@@ -180,7 +180,7 @@ cargo build --release
 rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc
 ```
 
-**The released programs** are the smallest ones: profile `release` (size-optimised, LTO, `panic = "abort"`, stripped) built with a nightly Rust that rebuilds the standard library for size and drops the panic machinery (`-Cpanic=immediate-abort`). `.github/workflows/release.yml` builds the 64-bit and the 32-bit program, runs `clippy` and the tests for both, and attaches the zips and their `.exe.sha256.txt` to the release; it refuses a release whose tag is not the version of `Cargo.toml` and `res/resources.rc` (`v2.1.0.0`). The nightly is not pinned: every build uses the newest one. To build them yourself, install the nightly once:
+**The released programs** are the smallest ones: profile `release` (size-optimised, LTO, `panic = "abort"`, stripped) built with a nightly Rust that rebuilds the standard library for size and drops the panic machinery (`-Cpanic=immediate-abort`). `.github/workflows/release.yml` builds the 64-bit and the 32-bit program, runs `clippy` and the tests for both, and attaches the zips and their `.exe.sha256.txt` to the release; it refuses a release whose tag is not the version of `Cargo.toml` and `res/resources.rc` (`v2.1.1.0`). The nightly is not pinned: every build uses the newest one. To build them yourself, install the nightly once:
 
 ```
 rustup toolchain install nightly -c rust-src
@@ -189,10 +189,10 @@ rustup toolchain install nightly -c rust-src
 Then, in a Developer Command Prompt (or any prompt where `cargo` finds the Visual Studio Build Tools):
 
 ```
-set RUSTFLAGS=-Zunstable-options -Cpanic=immediate-abort -C target-feature=+crt-static
+set RUSTFLAGS=-Zunstable-options -Cpanic=immediate-abort -C target-feature=+crt-static -C control-flow-guard
 ```
 
-(PowerShell: `$env:RUSTFLAGS = "-Zunstable-options -Cpanic=immediate-abort -C target-feature=+crt-static"`.) `RUSTFLAGS` makes Cargo ignore `.cargo/config.toml`, which is where `+crt-static` is, so it is repeated here; without it the program would need the Visual C++ Redistributable.
+(PowerShell: `$env:RUSTFLAGS = "-Zunstable-options -Cpanic=immediate-abort -C target-feature=+crt-static -C control-flow-guard"`.) `RUSTFLAGS` makes Cargo ignore `.cargo/config.toml`, which is where `+crt-static` and `control-flow-guard` are, so they are repeated here; without `+crt-static` the program would need the Visual C++ Redistributable.
 
 64-bit:
 

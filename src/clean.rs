@@ -27,7 +27,7 @@ fn clean_app_paths_one(path: &str) {
             let key = format!("{}\\{}", root, rel);
             if let Some(def) = reg::read_string(&key, "", *v) {
                 if util::contains_ic(&def, path) {
-                    reg::delete_tree(&key, *v);
+                    let _ = reg::delete_tree(&key, *v);
                 }
             }
         }

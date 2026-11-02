@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::clean;
 use crate::ctx::{
-    exit_code, exit_now, Ctx, EXIT_CANCELLED, EXIT_CONFIG, EXIT_REQUIREMENT, EXIT_RUNNING,
+    exit_code, exit_now, Ctx, EXIT_CANCELLED, EXIT_CONFIG, EXIT_NOT_DELIVERED, EXIT_REQUIREMENT, EXIT_RUNNING,
 };
 use crate::reg::{self, View};
 use crate::{crypto, ipc, sys, ui, util};
@@ -306,6 +306,19 @@ pub fn workdir_init(ctx: &mut Ctx) {
 
 // ---------------------------------------------------------- single instance
 
+/// Passes the command line of this instance to the running one and quits. When nobody receives it (the running
+/// instance is busy or closing) this instance cannot just disappear: the user is told, and the exit code says it.
+fn hand_over(ctx: &Ctx, pipe: &str) -> ! {
+    if ipc::send(pipe, &ctx.cmd_raw) {
+        exit_now();
+    }
+    ctx.msg(&format!(
+        "\"{}.exe\" is already running but it did not receive the command line of this instance (it may be busy or closing). Please, try again.",
+        ctx.exe_name
+    ));
+    exit_code(EXIT_NOT_DELIVERED)
+}
+
 /// The first instance of this executable owns a named mutex and listens on a named pipe; the other instances
 /// find the mutex taken and, depending on `!multiple`, pass their command line through the pipe and leave.
 pub fn multiple_init(ctx: &mut Ctx) {
@@ -321,18 +334,14 @@ pub fn multiple_init(ctx: &mut Ctx) {
     ctx.first_instance = false;
     match multiple {
         -1 => exit_code(EXIT_RUNNING),
-        1 => {
-            ipc::send(&pipe, &ctx.cmd_raw);
-            exit_now();
-        }
+        1 => hand_over(ctx, &pipe),
         0 => {
             let q = format!(
                 "\"{}.exe\" is already running. Are you sure to launch another instance of the main application?",
                 ctx.exe_name
             );
             if ui::ok_cancel(&ctx.title, &q) {
-                ipc::send(&pipe, &ctx.cmd_raw);
-                exit_now();
+                hand_over(ctx, &pipe);
             }
             exit_code(EXIT_CANCELLED);
         }

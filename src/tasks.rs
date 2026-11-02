@@ -53,7 +53,7 @@ const SPECS: &[Spec] = &[
     Spec { name: "date", min: 1, max: 3, allowed: Both },
     Spec { name: "delay", min: 1, max: 1, allowed: Both },
     Spec { name: "envvar", min: 2, max: 2, allowed: Both },
-    Spec { name: "giniread", min: 4, max: 4, allowed: Both },
+    Spec { name: "giniread", min: 4, max: 5, allowed: Both },
     Spec { name: "giniwrite", min: 2, max: 4, allowed: Both },
     Spec { name: "keeponly", min: 6, max: 6, allowed: Both },
     Spec { name: "killprocess", min: 1, max: 1, allowed: Both },

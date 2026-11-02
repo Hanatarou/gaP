@@ -36,6 +36,48 @@ fn dangerous_delete(ctx: &Ctx, path: &str) -> bool {
 
 // --------------------------------------------------------------- copy / move
 
+/// A move that replaces a folder puts the old one aside first: `.gap_old` while the move is not confirmed (it may
+/// hold the only copy of the data), `.gap_del` once it is (it only waits to be deleted).
+const ASIDE: &str = ".gap_old";
+const TRASH: &str = ".gap_del";
+
+/// Something is at `p` (a link that points nowhere counts).
+fn occupied(p: &str) -> bool {
+    std::fs::symlink_metadata(p).is_ok()
+}
+
+/// `base`, or `base2`, `base3`... the first name that is free.
+fn free_name(base: &str) -> String {
+    let mut name = base.to_string();
+    let mut n = 1;
+    while occupied(&name) {
+        n += 1;
+        name = format!("{}{}", base, n);
+    }
+    name
+}
+
+/// Finishes what an earlier replacing move of `tgt` left when it was interrupted: the garbage of a replacement
+/// that was confirmed is deleted, and the old folder is put back if the target is gone (the interruption came
+/// before the new content arrived). An old folder next to a target that exists is left alone: nothing says
+/// whether the target is complete.
+fn recover_replaced(ctx: &Ctx, tgt: &str) {
+    let (par, name) = util::split_parent(tgt);
+    let par = if par.len() == 2 { format!("{}\\", par) } else { par };
+    for old in util::list_dir(&par, &format!("{}{}*", name, TRASH), Kind::Dirs) {
+        if !util::remove_dir_recursive(&old) {
+            ctx.log(&format!("ERROR delete leftover folder \"{}\"", old));
+        }
+    }
+    let aside = format!("{}{}", tgt, ASIDE);
+    if occupied(&aside) && !occupied(tgt) {
+        match std::fs::rename(&aside, tgt) {
+            Ok(()) => ctx.log(&format!("\"{}\" put back from the folder an interrupted replacement left", tgt)),
+            Err(e) => ctx.log_err(&format!("put \"{}\" back from \"{}\"", tgt, aside), &e),
+        }
+    }
+}
+
 /// Core of `->dir`/`<-dir` with already resolved paths. What fails is written to the debug log.
 pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
     if eq_ic(&norm_cmp(src), &norm_cmp(tgt)) || !util::is_dir(src) {
@@ -55,28 +97,41 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
             }
         }
         (true, true) => {
-            if !util::exists(tgt) {
-                if let Err(e) = util::move_dir(src, tgt) {
+            let tgt = util::trim_trailing_sep(tgt);
+            recover_replaced(ctx, &tgt);
+            if !occupied(&tgt) {
+                if let Err(e) = util::move_dir(src, &tgt) {
                     ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
                 }
                 return;
             }
             // The old target is moved aside, not deleted: if the move fails it is put back, so a failure never
             // costs the data that was there.
-            let aside = format!("{}.gap_old_{}", tgt, std::process::id());
-            if let Err(e) = std::fs::rename(tgt, &aside) {
+            let aside = free_name(&format!("{}{}", tgt, ASIDE));
+            if let Err(e) = std::fs::rename(&tgt, &aside) {
                 ctx.log_err(&format!("replace \"{}\" (it cannot be moved aside)", tgt), &e);
                 return;
             }
-            match util::move_dir(src, tgt) {
+            match util::move_dir(src, &tgt) {
                 Ok(()) => {
-                    util::remove_dir_recursive(&aside);
+                    // One rename says "the replacement is done". If the deletion that follows fails or is
+                    // interrupted, what stays is marked as garbage and the next replacement of this target
+                    // removes it; it is never taken for the old data.
+                    let trash = free_name(&format!("{}{}", tgt, TRASH));
+                    let old = if std::fs::rename(&aside, &trash).is_ok() { trash } else { aside };
+                    if !util::remove_dir_recursive(&old) {
+                        ctx.log(&format!("ERROR delete the previous content \"{}\"", old));
+                    }
                 }
                 Err(e) => {
                     ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
-                    util::remove_dir_recursive(tgt); // what was copied before the failure
-                    if let Err(e) = std::fs::rename(&aside, tgt) {
-                        ctx.log_err(&format!("put \"{}\" back (it stays in \"{}\")", tgt, aside), &e);
+                    util::remove_dir_recursive(&tgt); // what was copied before the failure
+                    if let Err(e) = std::fs::rename(&aside, &tgt) {
+                        ctx.log_err(&format!("put \"{}\" back", tgt), &e);
+                        ctx.msg(&format!(
+                            "\"{}\" could not be replaced and could not be put back. Its previous content is in \"{}\".",
+                            tgt, aside
+                        ));
                     }
                 }
             }
@@ -276,7 +331,10 @@ pub fn minus_dir(ctx: &mut Ctx, args: &[String]) {
 
 pub fn minus_file(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
-    util::delete_files(&f);
+    let failed = util::delete_files(&f);
+    if failed > 0 {
+        ctx.log(&format!("ERROR delete {} file(s) of \"{}\"", failed, f));
+    }
 }
 
 // --------------------------------------------------------------- attributes
@@ -496,35 +554,52 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
     if items.len() <= number {
         return;
     }
-    let mut keyed: Vec<(String, String)> = items
+    // Sorted by the real time (UTC), not by the local time written as text: when the clock goes back (end of the
+    // daylight saving time) the local text of a newer file is smaller than the one of an older file.
+    // Each item is (time, name in lower case, path); the time is not used when the sort is by name.
+    let mut keyed: Vec<(u64, String, String)> = items
         .into_iter()
         .map(|p| {
             let md = std::fs::metadata(&p).ok();
-            let st = |f: fn(&std::fs::Metadata) -> std::io::Result<SystemTime>| -> String {
-                md.as_ref().and_then(|m| f(m).ok()).map(local_stamp).unwrap_or_else(|| "0".repeat(14))
+            let st = |f: fn(&std::fs::Metadata) -> std::io::Result<SystemTime>| -> u64 {
+                md.as_ref().and_then(|m| f(m).ok()).map(filetime_from_systemtime).unwrap_or(0)
             };
-            let key = match param.as_str() {
+            let time = match param.as_str() {
                 "modified" => st(|m| m.modified()),
                 "created" => st(|m| m.created()),
                 "accessed" => st(|m| m.accessed()),
-                "highest" => [st(|m| m.modified()), st(|m| m.created()), st(|m| m.accessed())].into_iter().max().unwrap(),
-                "lowest" => [st(|m| m.modified()), st(|m| m.created()), st(|m| m.accessed())].into_iter().min().unwrap(),
-                _ => util::file_name(&p).to_lowercase(),
+                "highest" => st(|m| m.modified()).max(st(|m| m.created())).max(st(|m| m.accessed())),
+                "lowest" => st(|m| m.modified()).min(st(|m| m.created())).min(st(|m| m.accessed())),
+                _ => 0,
             };
-            (key, p)
+            (time, util::file_name(&p).to_lowercase(), p)
         })
         .collect();
-    keyed.sort_by(|a, b| a.0.cmp(&b.0));
-    if !ascending {
-        keyed.reverse();
-    }
-    for (_, p) in keyed.into_iter().skip(number) {
-        match kind {
-            Kind::Files => util::delete_files(&p),
-            _ => {
-                util::remove_dir_recursive(&p);
-            }
+    keyed.sort_by(|a, b| {
+        let ord = if param == "name" { a.1.cmp(&b.1) } else { a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)) };
+        if ascending {
+            ord
+        } else {
+            ord.reverse()
         }
+    });
+    let mut failed = Vec::new();
+    for (_, _, p) in keyed.into_iter().skip(number) {
+        let ok = match kind {
+            Kind::Files => util::delete_files(&p) == 0,
+            _ => util::remove_dir_recursive(&p),
+        };
+        if !ok {
+            failed.push(p);
+        }
+    }
+    if !failed.is_empty() {
+        ctx.msg(&format!(
+            "keeponly: {} item(s) of \"{}\" could not be deleted (in use or protected), for example \"{}\".",
+            failed.len(),
+            path,
+            failed[0]
+        ));
     }
 }
 

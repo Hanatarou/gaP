@@ -382,10 +382,11 @@ fn ping_ip(ip: std::net::Ipv4Addr, timeout_ms: u32) -> bool {
             return false;
         }
         let data = [0x61u8; 32];
-        let mut reply = vec![0u8; std::mem::size_of::<ICMP_ECHO_REPLY>() + 64];
+        // ICMP_ECHO_REPLY has pointers in it: its buffer has to be aligned for it, and a `Vec<u8>` is not.
+        let mut reply = vec![0u64; (std::mem::size_of::<ICMP_ECHO_REPLY>() + 64).div_ceil(8)];
         let addr = u32::from_ne_bytes(ip.octets());
         let n = IcmpSendEcho(
-            h, addr, data.as_ptr() as _, data.len() as u16, null(), reply.as_mut_ptr() as _, reply.len() as u32, timeout_ms,
+            h, addr, data.as_ptr() as _, data.len() as u16, null(), reply.as_mut_ptr() as _, (reply.len() * 8) as u32, timeout_ms,
         );
         IcmpCloseHandle(h);
         if n == 0 {

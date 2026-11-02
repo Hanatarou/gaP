@@ -185,14 +185,24 @@ pub fn read_dword(key: &str, name: &str, view: View) -> Option<u32> {
     }
 }
 
-pub fn write_value(key: &str, name: &str, kind: u32, data: &[u8], view: View) -> bool {
-    let Some((root, sub)) = parse(key) else { return false };
-    let Ok(k) = create(root, &sub, view) else { return false };
-    unsafe { RegSetValueExW(k.0, w(name).as_ptr(), 0, kind, data.as_ptr(), data.len() as u32) == 0 }
+/// Writes the value (the key is created if it does not exist). The error is the system code.
+pub fn write_value(key: &str, name: &str, kind: u32, data: &[u8], view: View) -> Result<(), u32> {
+    let (root, sub) = parse(key).ok_or(ERROR_INVALID_PARAMETER)?;
+    let k = create(root, &sub, view)?;
+    match unsafe { RegSetValueExW(k.0, w(name).as_ptr(), 0, kind, data.as_ptr(), data.len() as u32) } {
+        0 => Ok(()),
+        e => Err(e),
+    }
 }
 
-pub fn delete_value(key: &str, name: &str, view: View) -> bool {
-    delete_values(key, &[name.to_string()], view) == 1
+/// Deletes one value. The error is the system code (`ERROR_FILE_NOT_FOUND`: the key or the value is not there).
+pub fn delete_value(key: &str, name: &str, view: View) -> Result<(), u32> {
+    let (root, sub) = parse(key).ok_or(ERROR_INVALID_PARAMETER)?;
+    let k = open(root, &sub, KEY_SET_VALUE, view)?;
+    match unsafe { RegDeleteValueW(k.0, w(name).as_ptr()) } {
+        0 => Ok(()),
+        e => Err(e),
+    }
 }
 
 /// Deletes the values `names` of the key, opening it once. Returns how many were deleted (a value that does not
@@ -203,33 +213,37 @@ pub fn delete_values(key: &str, names: &[String], view: View) -> usize {
     names.iter().filter(|n| unsafe { RegDeleteValueW(k.0, w(n).as_ptr()) } == 0).count()
 }
 
-pub fn create_key(path: &str, view: View) -> bool {
-    let Some((root, sub)) = parse(path) else { return false };
-    create(root, &sub, view).is_ok()
+/// Creates the key (nothing happens if it exists). The error is the system code.
+pub fn create_key(path: &str, view: View) -> Result<(), u32> {
+    let (root, sub) = parse(path).ok_or(ERROR_INVALID_PARAMETER)?;
+    create(root, &sub, view).map(|_| ())
 }
 
-/// Deletes the key and its whole subtree.
-pub fn delete_tree(path: &str, view: View) -> bool {
-    let Some((root, sub)) = parse(path) else { return false };
+/// Deletes the key and its whole subtree. The error is the system code.
+pub fn delete_tree(path: &str, view: View) -> Result<(), u32> {
+    let (root, sub) = parse(path).ok_or(ERROR_INVALID_PARAMETER)?;
     if sub.is_empty() {
-        return false;
+        return Err(ERROR_INVALID_PARAMETER);
     }
     let wsub = w(&sub);
     // The root, opened in the wanted view, takes the whole path: the parent of the key is never opened. The
     // least access is tried first, then the rights the documentation of RegDeleteTree lists.
+    let mut last = ERROR_ACCESS_DENIED;
     for access in [KEY_READ, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE] {
         let mut h: HKEY = null_mut();
-        if unsafe { RegOpenKeyExW(root, null(), 0, access | view.sam(), &mut h) } != 0 {
+        let r = unsafe { RegOpenKeyExW(root, null(), 0, access | view.sam(), &mut h) };
+        if r != 0 {
+            last = r;
             continue;
         }
         let k = Key(h);
         match unsafe { RegDeleteTreeW(k.0, wsub.as_ptr()) } {
-            0 => return true,
-            ERROR_ACCESS_DENIED => {}
-            _ => return false,
+            0 => return Ok(()),
+            ERROR_ACCESS_DENIED => last = ERROR_ACCESS_DENIED,
+            e => return Err(e),
         }
     }
-    false
+    Err(last)
 }
 
 /// Copies values and subkeys from `src` to `dst` (REG COPY /s /f). The error is the system code;
@@ -281,7 +295,7 @@ pub fn delete_empty_parents(path: &str, view: View) {
     while parts.len() > 1 {
         let p = format!("{}\\{}", rootname, parts.join("\\"));
         if key_state(&p, view) == 2 {
-            delete_tree(&p, view);
+            let _ = delete_tree(&p, view);
             parts.pop();
         } else {
             break;

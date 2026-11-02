@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::io;
+use std::os::windows::fs::FileTypeExt;
 use std::path::Path;
 
 use windows_sys::Win32::Globalization::{
@@ -290,7 +291,9 @@ fn scan_dir(dir: &str, filter: &str, kind: Kind, stop_at_first: bool) -> Vec<Str
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            // A link to a folder (symbolic link or junction) is a folder here, as it is for the system; `is_dir`
+            // alone is false for it.
+            let is_dir = e.file_type().map(|t| t.is_dir() || t.is_symlink_dir()).unwrap_or(false);
             let ok_kind = match kind {
                 Kind::Files => !is_dir,
                 Kind::Dirs => is_dir,
@@ -347,17 +350,20 @@ fn clear_readonly(p: &str) {
     }
 }
 
-/// `FileDelete`: deletes file(s), with wildcards; removes the read-only attribute.
-pub fn delete_files(p: &str) {
+/// `FileDelete`: deletes file(s), with wildcards; removes the read-only attribute. Returns how many files
+/// could not be deleted.
+pub fn delete_files(p: &str) -> usize {
+    let one = |f: &str| -> usize {
+        clear_readonly(f);
+        usize::from(fs::remove_file(f).is_err())
+    };
     if has_wildcard(p) {
         let (par, name) = split_parent(p);
-        for f in list_dir(&par, &name, Kind::Files) {
-            clear_readonly(&f);
-            let _ = fs::remove_file(&f);
-        }
+        list_dir(&par, &name, Kind::Files).iter().map(|f| one(f)).sum()
     } else if Path::new(p).is_file() {
-        clear_readonly(p);
-        let _ = fs::remove_file(p);
+        one(p)
+    } else {
+        0
     }
 }
 
