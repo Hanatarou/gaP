@@ -93,16 +93,47 @@ pub fn undefined_env_names(s: &str) -> Vec<String> {
 const LT: char = '\u{E002}';
 const OPEN: char = '\u{E000}';
 const CLOSE: char = '\u{E001}';
+const ESC: char = '\u{E003}';
+
+/// Puts ESC before each stand-in and before ESC itself, so a text that already has one of them is not read as a
+/// neutralized character.
+fn protect(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, LT | OPEN | CLOSE | ESC) {
+            o.push(ESC);
+        }
+        o.push(c);
+    }
+    o
+}
 
 /// A value goes into the text with `<`, `{` and `}` replaced, so nothing in it can be taken for a macro or for an
 /// escape, whatever it is (a CLSID in the command line, the text of the clipboard, a `<` at its end).
 fn neutralize(v: &str) -> String {
-    v.replace('<', &LT.to_string()).replace('{', &OPEN.to_string()).replace('}', &CLOSE.to_string())
+    protect(v).replace('<', &LT.to_string()).replace('{', &OPEN.to_string()).replace('}', &CLOSE.to_string())
 }
 
-/// The final text: the escapes `<{` and `<}` become `{` and `}`, and the stand-ins of the values become what they were.
+/// The final text: the escapes `<{` and `<}` become `{` and `}`, the stand-ins become what they were and a
+/// character after ESC is kept as it is.
 fn restore(s: &str) -> String {
-    unescape(s).replace(LT, "<").replace(OPEN, "{").replace(CLOSE, "}")
+    let mut o = String::with_capacity(s.len());
+    let text = unescape(s);
+    let mut it = text.chars();
+    while let Some(c) = it.next() {
+        match c {
+            ESC => {
+                if let Some(n) = it.next() {
+                    o.push(n);
+                }
+            }
+            LT => o.push('<'),
+            OPEN => o.push('{'),
+            CLOSE => o.push('}'),
+            _ => o.push(c),
+        }
+    }
+    o
 }
 
 /// Replaces `{{NAME}}` (the value with doubled backslashes) and `{NAME}`: the smallest macro first, again and again, so
@@ -110,13 +141,13 @@ fn restore(s: &str) -> String {
 /// a value goes in with its braces neutralized, so each step takes one macro out and none comes in, and the loop
 /// always ends. An undefined name is reported by the caller. `Err` = (the text up to the problem, the name).
 fn expand_macros(s: &str, mut lookup: impl FnMut(&str) -> Option<String>) -> Result<String, (String, String)> {
-    let mut s = s.to_string();
+    let mut s = protect(s);
     while let Some((a, b)) = innermost(&s) {
         let t = s.as_bytes();
         // `{{NAME}}`: the macro is wrapped by one more pair of unescaped braces
         let doubled = a > 0 && t.get(b + 1) == Some(&b'}') && t[a - 1] == b'{' && (a == 1 || t[a - 2] != b'<');
         let (from, to) = if doubled { (a - 1, b + 2) } else { (a, b + 1) };
-        let name = unescape(&s[a + 1..b]);
+        let name = restore(&s[a + 1..b]);
         match lookup(&name) {
             Some(v) => {
                 let v = neutralize(&v);
@@ -297,6 +328,8 @@ mod tests {
             "LANG" => Some("pt".to_string()),
             "PREFIX_pt" => Some("ola".to_string()),
             "LT" => Some("a<".to_string()),
+            "PUA" => Some("\u{E000}\u{E001}\u{E002}\u{E003}x".to_string()),
+            "BR" => Some("a{b}c<".to_string()),
             _ => None,
         }
     }
@@ -335,6 +368,22 @@ mod tests {
         // a "<" at the end of a value must not escape the "{" that follows it
         assert_eq!(expand_macros("{LT}{X}", lookup).as_deref(), Ok("a<x"));
         assert_eq!(expand_macros("{LT}<{X<}", lookup).as_deref(), Ok("a<{X}"));
+    }
+
+    #[test]
+    fn text_with_the_stand_ins_comes_out_unchanged() {
+        let pua = "\u{E000}\u{E001}\u{E002}\u{E003}";
+        // in a value, and in the text itself
+        assert_eq!(expand_macros("[{PUA}]", lookup).as_deref(), Ok(format!("[{}x]", pua).as_str()));
+        assert_eq!(expand_macros(&format!("{}{{X}}", pua), lookup).as_deref(), Ok(format!("{}x", pua).as_str()));
+    }
+
+    #[test]
+    fn an_undefined_name_made_with_a_value_is_shown_as_it_is() {
+        assert_eq!(
+            expand_macros("{q{BR}z}", lookup),
+            Err(("{qa{b}c<z}".to_string(), "qa{b}c<z".to_string()))
+        );
     }
 
     #[test]
