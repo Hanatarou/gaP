@@ -1,4 +1,5 @@
-# Windows: link the C runtime statically so the .exe needs no Visual C++ Redistributable.
+# Windows: link the C runtime statically so the .exe needs no Visual C++ Redistributable, and build with
+# Control Flow Guard (indirect calls may only reach real functions).
 # (The target is chosen on the command line / by the workflow: x86_64-pc-windows-msvc or i686-pc-windows-msvc.)
 [target.'cfg(all(windows, target_env = "msvc"))']
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "control-flow-guard"]
