@@ -77,7 +77,7 @@ The same `.ini` works with both builds. What decides the architecture is the **a
 - to change from one build to the other, replace `gaP.exe` and keep its name: the `.ini` has the same name.
 
 ### Requirements
-- Windows 10 or later (a limit of the Rust standard library, not of gaP itself). The C runtime is linked statically: nothing to install.
+- Windows 10 or later (a limit of the Rust standard library, not of gaP itself); the manifest declares only Windows 10 and 11 (one identifier for both) as supported systems. The C runtime is linked statically: nothing to install.
 
 ## 🚀 Usage
 

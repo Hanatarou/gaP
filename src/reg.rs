@@ -226,10 +226,11 @@ pub fn delete_tree(path: &str, view: View) -> Result<(), u32> {
         return Err(ERROR_INVALID_PARAMETER);
     }
     let wsub = w(&sub);
-    // The root, opened in the wanted view, takes the whole path: the parent of the key is never opened. The
-    // least access is tried first, then the rights the documentation of RegDeleteTree lists.
+    // The root, opened in the wanted view, takes the whole path: the parent of the key is never opened. The rights
+    // that the documentation of RegDeleteTree lists come first, so the usual case needs one open and one call;
+    // KEY_READ is the fallback for a root that cannot be opened with them (HKLM, HKCR for a standard user).
     let mut last = ERROR_ACCESS_DENIED;
-    for access in [KEY_READ, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE] {
+    for access in [DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE, KEY_READ] {
         let mut h: HKEY = null_mut();
         let r = unsafe { RegOpenKeyExW(root, null(), 0, access | view.sam(), &mut h) };
         if r != 0 {

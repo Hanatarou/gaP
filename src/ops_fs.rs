@@ -57,6 +57,13 @@ fn free_name(base: &str) -> String {
     name
 }
 
+/// `entry` is a name that `free_name` makes for the trash of `name`: `<name>.gap_del`, or that with a number after it.
+/// The wildcard that lists the candidates also matches `<name>.gap_del_old` and the like, and those are not ours.
+fn is_trash_name(name: &str, entry: &str) -> bool {
+    let base = format!("{}{}", name, TRASH).to_lowercase();
+    entry.to_lowercase().strip_prefix(&base).is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Finishes what an earlier replacing move of `tgt` left when it was interrupted: the garbage of a replacement
 /// that was confirmed is deleted, and the old folder is put back if the target is gone (the interruption came
 /// before the new content arrived). An old folder next to a target that exists is left alone: nothing says
@@ -65,7 +72,7 @@ fn recover_replaced(ctx: &Ctx, tgt: &str) {
     let (par, name) = util::split_parent(tgt);
     let par = if par.len() == 2 { format!("{}\\", par) } else { par };
     for old in util::list_dir(&par, &format!("{}{}*", name, TRASH), Kind::Dirs) {
-        if !util::remove_dir_recursive(&old) {
+        if is_trash_name(&name, &util::file_name(&old)) && !util::remove_dir_recursive(&old) {
             ctx.log(&format!("ERROR delete leftover folder \"{}\"", old));
         }
     }
@@ -667,5 +674,25 @@ pub fn regmerge(ctx: &mut Ctx, args: &[String]) {
     }
     if let Err(e) = util::write_text(&f1, &out, e1) {
         ctx.log_err(&format!("write \"{}\"", f1), &e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_trash_that_gap_makes_is_deleted() {
+        // what free_name makes
+        assert!(is_trash_name("Data", "Data.gap_del"));
+        assert!(is_trash_name("Data", "Data.gap_del2"));
+        assert!(is_trash_name("Data", "DATA.GAP_DEL13"));
+        // folders of the user that only start like it
+        assert!(!is_trash_name("Data", "Data.gap_del_old"));
+        assert!(!is_trash_name("Data", "Data.gap_del_teste"));
+        assert!(!is_trash_name("Data", "Data.gap_delete"));
+        assert!(!is_trash_name("Data", "Data.gap_del.bak"));
+        assert!(!is_trash_name("Data", "Data"));
+        assert!(!is_trash_name("Data", "Data.gap_old"));
     }
 }

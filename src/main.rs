@@ -20,7 +20,7 @@ mod ui;
 mod util;
 mod vars;
 
-use ctx::{exit_code, exit_now, Ctx, Section, EXIT_CONFIG};
+use ctx::{exit_code, exit_now, Ctx, Section, EXIT_CANCELLED, EXIT_CONFIG};
 use util::eq_ic;
 
 static HELP_TXT: &[u8] = include_bytes!("../res/gaP_Help.txt");
@@ -75,16 +75,22 @@ fn launcher(ctx: &mut Ctx) {
         checks::os_init(ctx);
         checks::wait_init(ctx);
     } else {
-        let mut created = false;
-        if !ctx.is_readonly && ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?") {
-            // IMPROVEMENT: the original ignored the failure to create the .ini.
-            match std::fs::write(&ctx.ini_path, INI_TEMPLATE) {
-                Ok(()) => created = true,
-                Err(_) => ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name)),
+        // No .ini and none created is a configuration problem, unless the user refused to create it: that is a
+        // question that was cancelled.
+        let mut code = EXIT_CONFIG;
+        if !ctx.is_readonly {
+            if ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?") {
+                // IMPROVEMENT: the original ignored the failure to create the .ini.
+                match std::fs::write(&ctx.ini_path, INI_TEMPLATE) {
+                    Ok(()) => code = 0,
+                    Err(_) => ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name)),
+                }
+            } else {
+                code = EXIT_CANCELLED;
             }
         }
         clean::clean_all(&ctx.script_full, None);
-        exit_code(if created { 0 } else { EXIT_CONFIG });
+        exit_code(code);
     }
 
     clean_traces(ctx);

@@ -696,8 +696,13 @@ Notes:
 * To rename a directory move directory contents to a different
   directory on the same path;
 * An empty target directory (NULL) defaults to "Settings" subdirectory
-  of the launcher; and
-* If source and target are equal no operation will be done.
+  of the launcher;
+* If source and target are equal no operation will be done; and
+* When "move, overwrite" replaces an existing target, the old content waits
+  next to it as "<target>.gap_old" until the move is done, and then as
+  "<target>.gap_del" until it is deleted; a run that was interrupted is
+  finished the next time. Do not use those two names (nor "<target>.gap_del"
+  followed by digits) for your own directories.
 
 [->file]
 Description:
