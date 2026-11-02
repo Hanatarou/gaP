@@ -178,7 +178,7 @@ fn read_message(pipe: HANDLE) -> Option<String> {
             return None;
         }
     }
-    let units: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     Some(String::from_utf16_lossy(units.strip_prefix(&[0xFEFF]).unwrap_or(&units)))
 }
 
