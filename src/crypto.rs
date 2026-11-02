@@ -79,12 +79,21 @@ pub fn sha1_hex(data: &[u8]) -> String {
     to_hex(&Sha1::digest(data))
 }
 
-/// SHA-1 of a file; "-1" if it does not exist (like the original `HashFile`).
+/// SHA-1 of a file; "-1" if it does not exist (like the original `HashFile`). The file is read in blocks, so
+/// the whole executable is never held in memory.
 pub fn sha1_file(path: &str) -> String {
-    match std::fs::read(path) {
-        Ok(b) => sha1_hex(&b),
-        Err(_) => "-1".to_string(),
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else { return "-1".to_string() };
+    let mut h = Sha1::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => h.update(&buf[..n]),
+            Err(_) => return "-1".to_string(),
+        }
     }
+    to_hex(&h.finalize())
 }
 
 #[cfg(test)]

@@ -1,6 +1,11 @@
 use std::path::PathBuf;
 
 fn main() {
+    // DLLs that the program loads are looked for only in System32 (LOAD_LIBRARY_SEARCH_SYSTEM32), never in the
+    // folder of the program or in the current folder, which a portable program often runs from.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    }
     println!("cargo:rerun-if-changed=res/resources.rc");
     println!("cargo:rerun-if-changed=res/icon.ico");
     println!("cargo:rerun-if-changed=res/gap.manifest");

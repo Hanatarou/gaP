@@ -2,21 +2,17 @@
 //! regkey, regvalue, (regkey), (regvalue), ->regkey, <-regkey, ->regvalue,
 //! <-regvalue, +regkey, +regvalue, -regkey, -regvalue, regexport, regimport.
 
+use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+
 use crate::ctx::{Ctx, Prog};
 use crate::reg::{self, View};
 use crate::{sys, util};
-use util::eq_ic;
-
-const NULL: &str = "NULL";
-
-fn arg(a: &[String], i: usize) -> &str {
-    a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
-}
+use util::{arg, eq_ic, is_null};
 
 /// Registry view flag: NULL/empty/x86 = 32 bits; x64 = 64 bits.
 fn view_of(ctx: &mut Ctx, s: &str) -> View {
     let f = ctx.expand(s);
-    View::from_flag(if f.is_empty() || f == NULL { "x86" } else { &f })
+    View::from_flag(if f.is_empty() || is_null(&f) { "x86" } else { &f })
 }
 
 fn key_of(ctx: &mut Ctx, s: &str) -> String {
@@ -44,7 +40,7 @@ fn split_value(path: &str) -> (String, String) {
 }
 
 fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
-    let mut f = if arg_val == NULL {
+    let mut f = if is_null(arg_val) {
         format!("{}\\settings.reg", ctx.script_dir.trim_end_matches('\\'))
     } else {
         let e = ctx.expand(arg_val);
@@ -65,13 +61,20 @@ fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
 // NEW (gaP-rs): a copy that fails (or a move whose source cannot be removed) is reported; before it
 // was silent. A missing source is still silent: there is nothing to copy or to restore.
 pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
-    if eq_ic(src, tgt) || !reg::key_exists(src, view) {
+    if eq_ic(src, tgt) {
         return;
     }
-    if !reg::copy_tree(src, tgt, view) {
-        change_failed(ctx, &format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt));
-    } else if mv && !reg::delete_tree(src, view) {
-        change_failed(ctx, &format!("The registry key \"{}\" was copied but could not be removed.", src));
+    match reg::copy_tree(src, tgt, view) {
+        Ok(()) => {
+            if mv && !reg::delete_tree(src, view) {
+                change_failed(ctx, &format!("The registry key \"{}\" was copied but could not be removed.", src));
+            }
+        }
+        Err(ERROR_FILE_NOT_FOUND) => {}
+        Err(code) => {
+            ctx.log_err(&format!("copy registry key \"{}\"", src), &format!("error {}", code));
+            change_failed(ctx, &format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt));
+        }
     }
 }
 
@@ -128,7 +131,7 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let name = ctx.expand(arg(args, 1));
     let data = ctx.expand(arg(args, 2));
     let mut kind = ctx.expand(arg(args, 3));
-    if kind == NULL || kind.is_empty() {
+    if is_null(&kind) || kind.is_empty() {
         kind = "REG_SZ".into();
     }
     let sep = ctx.expand(arg(args, 4));
@@ -147,13 +150,14 @@ pub fn minus_regkey(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let eflag = ctx.expand(arg(args, 1));
     let view = view_of(ctx, arg(args, 2));
-    delete_key(&k, eq_ic(&eflag, "ifempty"), view);
+    delete_key(ctx, &k, eq_ic(&eflag, "ifempty"), view);
 }
 
-pub fn delete_key(key: &str, if_empty: bool, view: View) {
-    let st = reg::key_state(key, view);
-    if st > 0 && (!if_empty || st == 2) {
-        reg::delete_tree(key, view);
+/// Deletes the key (`if_empty`: only if it has no values and no subkeys). A key that is not there is not an error.
+pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
+    let st = if if_empty { reg::key_state(key, view) } else { 1 };
+    if st > 0 && (!if_empty || st == 2) && !reg::delete_tree(key, view) && reg::key_exists(key, view) {
+        ctx.log(&format!("ERROR delete registry key \"{}\"", key));
     }
 }
 
@@ -161,7 +165,9 @@ pub fn minus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let name = ctx.expand(arg(args, 1));
     let view = view_of(ctx, arg(args, 2));
-    reg::delete_value(&k, &name, view);
+    if !reg::delete_value(&k, &name, view) && reg::value_exists(&k, &name, view) {
+        ctx.log(&format!("ERROR delete registry value \"{}\\{}\"", k, name));
+    }
 }
 
 // ----------------------------------------------------- backup / restore
@@ -173,7 +179,7 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 2));
     let backup = format!("{}_backup", src);
     copy_key(ctx, &src, &backup, false, view);
-    delete_key(&src, false, view);
+    delete_key(ctx, &src, false, view);
     import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: format!("{}\\", src), file, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: false, view });
@@ -227,9 +233,11 @@ pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
     match p {
         Prog::RegExport { key, file, view } => export_to(ctx, key, file, *view),
-        Prog::MinusRegKey { key, if_empty, view } => delete_key(key, *if_empty, *view),
+        Prog::MinusRegKey { key, if_empty, view } => delete_key(ctx, key, *if_empty, *view),
         Prog::MinusRegValue { key, name, view } => {
-            reg::delete_value(key, name, *view);
+            if !reg::delete_value(key, name, *view) && reg::value_exists(key, name, *view) {
+                ctx.log(&format!("ERROR delete registry value \"{}\\{}\"", key, name));
+            }
         }
         Prog::LtrRegKey { src, tgt, mv, view } => copy_key(ctx, src, tgt, *mv, *view),
         Prog::LtrRegValue { src, tgt, mv, view } => copy_value(ctx, src, tgt, *mv, *view),
@@ -333,15 +341,10 @@ pub fn export_to(_ctx: &Ctx, key_or_value: &str, file: &str, view: View) {
 }
 
 pub fn regexport_kw(ctx: &mut Ctx, args: &[String]) {
-    let file = settings_reg_dirlike(ctx, arg(args, 1));
+    let file = settings_reg(ctx, arg(args, 1));
     let spec = ctx.expand_ex(arg(args, 0), true);
     let view = view_of(ctx, arg(args, 2));
     export_to(ctx, &spec, &file, view);
-}
-
-/// Like `settings_reg`, but without forcing ".reg" on paths that already end in .reg.
-fn settings_reg_dirlike(ctx: &mut Ctx, a: &str) -> String {
-    settings_reg(ctx, a)
 }
 
 pub fn regimport_kw(ctx: &mut Ctx, args: &[String]) {

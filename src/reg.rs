@@ -6,6 +6,7 @@
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::System::Registry::*;
 
 use crate::util::{from_w, w};
@@ -31,6 +32,14 @@ impl View {
             View::Native => 0,
             View::X86 => KEY_WOW64_32KEY,
             View::X64 => KEY_WOW64_64KEY,
+        }
+    }
+    /// The same view as a flag of `RegGetValueW`.
+    fn get_flag(self) -> u32 {
+        match self {
+            View::Native => 0,
+            View::X86 => RRF_SUBKEY_WOW6432KEY,
+            View::X64 => RRF_SUBKEY_WOW6464KEY,
         }
     }
     pub fn reg_exe_flag(self) -> &'static str {
@@ -69,32 +78,34 @@ impl Drop for Key {
     }
 }
 
-fn open(root: HKEY, sub: &str, access: u32, view: View) -> Option<Key> {
+fn open(root: HKEY, sub: &str, access: u32, view: View) -> Result<Key, u32> {
     let mut h: HKEY = null_mut();
     let r = unsafe { RegOpenKeyExW(root, w(sub).as_ptr(), 0, access | view.sam(), &mut h) };
     if r == 0 {
-        Some(Key(h))
+        Ok(Key(h))
     } else {
-        None
+        Err(r)
     }
 }
 
-fn create(root: HKEY, sub: &str, view: View) -> Option<Key> {
+/// Creates the key (or opens it if it exists) with the rights to add values and subkeys and no more: not the
+/// right to change who owns the key or who can use it.
+fn create(root: HKEY, sub: &str, view: View) -> Result<Key, u32> {
     let mut h: HKEY = null_mut();
     let r = unsafe {
-        RegCreateKeyExW(root, w(sub).as_ptr(), 0, null(), 0, KEY_ALL_ACCESS | view.sam(), null(), &mut h, null_mut())
+        RegCreateKeyExW(root, w(sub).as_ptr(), 0, null(), 0, KEY_WRITE | view.sam(), null(), &mut h, null_mut())
     };
     if r == 0 {
-        Some(Key(h))
+        Ok(Key(h))
     } else {
-        None
+        Err(r)
     }
 }
 
 /// 0 = does not exist; 1 = exists with content; 2 = exists and is empty.
 pub fn key_state(path: &str, view: View) -> u8 {
     let Some((root, sub)) = parse(path) else { return 0 };
-    let Some(k) = open(root, &sub, KEY_READ, view) else { return 0 };
+    let Ok(k) = open(root, &sub, KEY_READ, view) else { return 0 };
     let (mut subkeys, mut values) = (0u32, 0u32);
     unsafe {
         RegQueryInfoKeyW(
@@ -120,22 +131,29 @@ pub struct Value {
 
 pub fn read_value(key: &str, name: &str, view: View) -> Option<Value> {
     let (root, sub) = parse(key)?;
-    let k = open(root, &sub, KEY_QUERY_VALUE, view)?;
+    let (wsub, wname) = (w(&sub), w(name));
+    let psub = if sub.is_empty() { null() } else { wsub.as_ptr() };
+    // Unexpanded, whatever the type; the system opens the key in the requested view by itself.
+    let flags = RRF_RT_ANY | RRF_NOEXPAND | view.get_flag();
     unsafe {
-        let wn = w(name);
         let (mut kind, mut size) = (0u32, 0u32);
-        if RegQueryValueExW(k.0, wn.as_ptr(), null(), &mut kind, null_mut(), &mut size) != 0 {
+        if RegGetValueW(root, psub, wname.as_ptr(), flags, &mut kind, null_mut(), &mut size) != 0 {
             return None;
         }
-        let mut buf = vec![0u8; size as usize + 2];
-        let mut sz2 = size;
-        let mut kind2 = kind;
-        let r = RegQueryValueExW(k.0, wn.as_ptr(), null(), &mut kind2, buf.as_mut_ptr(), &mut sz2);
-        if r != 0 {
-            return None;
+        // The value can grow between the two calls: ask again with the new size.
+        for _ in 0..4 {
+            let mut buf = vec![0u8; size as usize + 2];
+            let mut got = buf.len() as u32;
+            match RegGetValueW(root, psub, wname.as_ptr(), flags, &mut kind, buf.as_mut_ptr() as *mut _, &mut got) {
+                0 => {
+                    buf.truncate(got as usize);
+                    return Some(Value { kind, data: buf });
+                }
+                ERROR_MORE_DATA => size = got,
+                _ => return None,
+            }
         }
-        buf.truncate(sz2 as usize);
-        Some(Value { kind: kind2, data: buf })
+        None
     }
 }
 
@@ -169,19 +187,25 @@ pub fn read_dword(key: &str, name: &str, view: View) -> Option<u32> {
 
 pub fn write_value(key: &str, name: &str, kind: u32, data: &[u8], view: View) -> bool {
     let Some((root, sub)) = parse(key) else { return false };
-    let Some(k) = create(root, &sub, view) else { return false };
+    let Ok(k) = create(root, &sub, view) else { return false };
     unsafe { RegSetValueExW(k.0, w(name).as_ptr(), 0, kind, data.as_ptr(), data.len() as u32) == 0 }
 }
 
 pub fn delete_value(key: &str, name: &str, view: View) -> bool {
-    let Some((root, sub)) = parse(key) else { return false };
-    let Some(k) = open(root, &sub, KEY_SET_VALUE, view) else { return false };
-    unsafe { RegDeleteValueW(k.0, w(name).as_ptr()) == 0 }
+    delete_values(key, &[name.to_string()], view) == 1
+}
+
+/// Deletes the values `names` of the key, opening it once. Returns how many were deleted (a value that does not
+/// exist is not an error, it just does not count).
+pub fn delete_values(key: &str, names: &[String], view: View) -> usize {
+    let Some((root, sub)) = parse(key) else { return 0 };
+    let Ok(k) = open(root, &sub, KEY_SET_VALUE, view) else { return 0 };
+    names.iter().filter(|n| unsafe { RegDeleteValueW(k.0, w(n).as_ptr()) } == 0).count()
 }
 
 pub fn create_key(path: &str, view: View) -> bool {
     let Some((root, sub)) = parse(path) else { return false };
-    create(root, &sub, view).is_some()
+    create(root, &sub, view).is_ok()
 }
 
 /// Deletes the key and its whole subtree.
@@ -190,34 +214,40 @@ pub fn delete_tree(path: &str, view: View) -> bool {
     if sub.is_empty() {
         return false;
     }
-    let (parent, name) = match sub.rfind('\\') {
-        Some(i) => (sub[..i].to_string(), sub[i + 1..].to_string()),
-        None => (String::new(), sub.clone()),
-    };
-    let pk = if parent.is_empty() {
-        // top-level key: opens the root itself with the desired view
+    let wsub = w(&sub);
+    // The root, opened in the wanted view, takes the whole path: the parent of the key is never opened. The
+    // least access is tried first, then the rights the documentation of RegDeleteTree lists.
+    for access in [KEY_READ, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE] {
         let mut h: HKEY = null_mut();
-        let r = unsafe { RegOpenKeyExW(root, null(), 0, KEY_ALL_ACCESS | view.sam(), &mut h) };
-        if r == 0 { Some(Key(h)) } else { None }
-    } else {
-        open(root, &parent, KEY_ALL_ACCESS, view)
-    };
-    let Some(pk) = pk else { return false };
-    unsafe { RegDeleteTreeW(pk.0, w(&name).as_ptr()) == 0 }
+        if unsafe { RegOpenKeyExW(root, null(), 0, access | view.sam(), &mut h) } != 0 {
+            continue;
+        }
+        let k = Key(h);
+        match unsafe { RegDeleteTreeW(k.0, wsub.as_ptr()) } {
+            0 => return true,
+            ERROR_ACCESS_DENIED => {}
+            _ => return false,
+        }
+    }
+    false
 }
 
-/// Copies values and subkeys from `src` to `dst` (REG COPY /s /f).
-pub fn copy_tree(src: &str, dst: &str, view: View) -> bool {
-    let (Some((sr, ss)), Some((dr, ds))) = (parse(src), parse(dst)) else { return false };
-    let Some(sk) = open(sr, &ss, KEY_READ, view) else { return false };
-    let Some(dk) = create(dr, &ds, view) else { return false };
-    unsafe { RegCopyTreeW(sk.0, null(), dk.0) == 0 }
+/// Copies values and subkeys from `src` to `dst` (REG COPY /s /f). The error is the system code;
+/// `ERROR_FILE_NOT_FOUND` means the source does not exist.
+pub fn copy_tree(src: &str, dst: &str, view: View) -> Result<(), u32> {
+    let (Some((sr, ss)), Some((dr, ds))) = (parse(src), parse(dst)) else { return Err(ERROR_INVALID_PARAMETER) };
+    let sk = open(sr, &ss, KEY_READ, view)?;
+    let dk = create(dr, &ds, view)?;
+    match unsafe { RegCopyTreeW(sk.0, null(), dk.0) } {
+        0 => Ok(()),
+        e => Err(e),
+    }
 }
 
 pub fn enum_subkeys(path: &str, view: View) -> Vec<String> {
     let mut out = Vec::new();
     let Some((root, sub)) = parse(path) else { return out };
-    let Some(k) = open(root, &sub, KEY_READ, view) else { return out };
+    let Ok(k) = open(root, &sub, KEY_READ, view) else { return out };
     let mut i = 0;
     loop {
         let mut buf = [0u16; 256];
@@ -277,7 +307,7 @@ pub fn build_value(kind_name: &str, data: &str, sep: &str) -> Option<(u32, Vec<u
         "REG_SZ" => Some((REG_SZ, utf16z(data))),
         "REG_EXPAND_SZ" => Some((REG_EXPAND_SZ, utf16z(data))),
         "REG_MULTI_SZ" => {
-            let sep = if sep.is_empty() || sep == "NULL" { "\\0" } else { sep };
+            let sep = if sep.is_empty() || crate::util::is_null(sep) { "\\0" } else { sep };
             let mut u: Vec<u16> = Vec::new();
             if !data.is_empty() {
                 for part in data.split(sep) {
@@ -304,25 +334,6 @@ pub fn build_value(kind_name: &str, data: &str, sep: &str) -> Option<(u32, Vec<u
         _ => None,
     }
 }
-
-#[allow(dead_code)]
-pub fn type_name(kind: u32) -> &'static str {
-    match kind {
-        REG_NONE => "REG_NONE",
-        REG_SZ => "REG_SZ",
-        REG_EXPAND_SZ => "REG_EXPAND_SZ",
-        REG_BINARY => "REG_BINARY",
-        REG_DWORD => "REG_DWORD",
-        REG_DWORD_BIG_ENDIAN => "REG_DWORD_BIG_ENDIAN",
-        REG_LINK => "REG_LINK",
-        REG_MULTI_SZ => "REG_MULTI_SZ",
-        REG_QWORD => "REG_QWORD",
-        _ => "REG_BINARY",
-    }
-}
-
-#[allow(dead_code)]
-pub const ERROR_OK: u32 = ERROR_SUCCESS;
 
 #[cfg(test)]
 mod tests {

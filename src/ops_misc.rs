@@ -2,21 +2,16 @@
 //! killprocess, message, nowait, quit, regdll, run, service, stringreplace,
 //! symlink, systemrefresh, uservar.
 
-use std::ptr::null_mut;
+use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Storage::FileSystem::{CreateSymbolicLinkW, DeleteFileW};
-use windows_sys::Win32::Storage::FileSystem::RemoveDirectoryW;
+use windows_sys::Win32::Foundation::GetLastError;
+use windows_sys::Win32::Storage::FileSystem::{CreateSymbolicLinkW, DeleteFileW, RemoveDirectoryW, DELETE};
+use windows_sys::Win32::System::Services::*;
 
-use crate::ctx::{exit_now, Ctx, Prog, Section, FUNC_MACROS, RESERVED_VARS};
+use crate::ctx::{exit_code, exit_now, Ctx, Prog, Section, EXIT_CANCELLED, FUNC_MACROS, RESERVED_VARS};
 use crate::ini::IniDoc;
 use crate::{clean, sys, ui, util};
-use util::eq_ic;
-
-const NULL: &str = "NULL";
-
-fn arg(a: &[String], i: usize) -> &str {
-    a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
-}
+use util::{arg, eq_ic, is_null};
 
 /// Full path, as written (what other programs and links must receive).
 fn full_logical(ctx: &mut Ctx, p: &str) -> String {
@@ -87,7 +82,7 @@ pub fn giniread(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     let doc = IniDoc::load(&file);
-    let section = if sec == NULL { None } else { Some(sec.as_str()) };
+    let section = if is_null(&sec) { None } else { Some(sec.as_str()) };
     let val = doc.get(section, &key).unwrap_or_else(|| "NOT_FOUND!".to_string());
     set_user_var(ctx, &var, &val);
 }
@@ -96,12 +91,12 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
     let file = full(ctx, arg(args, 0));
     let mut sec = ctx.expand(arg(args, 1));
     let mut key = ctx.expand(arg(args, 2));
-    if key == NULL {
+    if is_null(&key) {
         key.clear();
     }
     let key = key.replace("*NULL*", "NULL");
     let mut val = ctx.expand(arg(args, 3));
-    if val == NULL {
+    if is_null(&val) {
         val.clear();
     }
     let val = val.replace("*NULL*", "NULL");
@@ -111,14 +106,14 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
         sec = sec[2..].to_string();
     }
     if delete_section {
-        if sec == NULL {
+        if is_null(&sec) {
             doc.delete_global_keys();
         } else {
             doc.delete_section(&sec.replace("*NULL*", "NULL"));
         }
     } else {
         let sec = sec.replace("*NULL*", "NULL");
-        let s = if sec == "NULL" && arg(args, 1) != "*NULL*" { None } else { Some(sec.as_str()) };
+        let s = if is_null(&sec) && arg(args, 1) != "*NULL*" { None } else { Some(sec.as_str()) };
         if key.is_empty() {
             // nothing to write (the original also ignored this case)
         } else if val.is_empty() {
@@ -128,7 +123,9 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
             doc.set(s, &key, &val);
         }
     }
-    let _ = doc.save(&file);
+    if let Err(e) = doc.save(&file) {
+        ctx.log_err(&format!("write \"{}\"", file), &e);
+    }
 }
 
 pub fn stringreplace(ctx: &mut Ctx, args: &[String]) {
@@ -136,7 +133,7 @@ pub fn stringreplace(ctx: &mut Ctx, args: &[String]) {
     let find = ctx.expand(arg(args, 1));
     let mut rep = ctx.expand(arg(args, 2));
     let var = ctx.expand(arg(args, 3));
-    if rep == NULL {
+    if is_null(&rep) {
         rep.clear();
     }
     let rep = rep.replace("*NULL*", "NULL");
@@ -158,7 +155,7 @@ pub fn message(ctx: &mut Ctx, args: &[String]) {
     }
     if eq_ic(arg(args, 1), "cancellable") {
         if !ui::ok_cancel_topmost(&ctx.title, &text) {
-            exit_now();
+            exit_code(EXIT_CANCELLED);
         }
     } else {
         ui::info_topmost(&ctx.title, &text);
@@ -190,7 +187,7 @@ pub fn regdll(ctx: &mut Ctx, args: &[String]) {
     // in the registry view of the application and resolves the path itself.
     let file = full_logical(ctx, arg(args, 0));
     let mut flag = ctx.expand(arg(args, 1));
-    if flag == NULL || flag.is_empty() {
+    if is_null(&flag) || flag.is_empty() {
         flag = "register".into();
     }
     if !util::is_file(&ctx.io_path(&file)) {
@@ -209,11 +206,11 @@ pub fn grun(ctx: &mut Ctx, args: &[String]) {
     let app = full(ctx, arg(args, 0));
     let wait = ctx.expand(arg(args, 1));
     let mut cl = ctx.expand(arg(args, 2));
-    if cl == NULL {
+    if is_null(&cl) {
         cl.clear();
     }
     let wd = ctx.expand(arg(args, 3));
-    let wd = if wd == NULL || wd.is_empty() {
+    let wd = if is_null(&wd) || wd.is_empty() {
         ctx.script_dir.trim_end_matches('\\').to_string()
     } else {
         util::path_full(&wd, &ctx.script_dir)
@@ -247,40 +244,119 @@ fn service_exe_exists(spec: &str) -> bool {
     false
 }
 
+/// A service of the type that can show windows on the desktop (`type= interact`).
+const SERVICE_INTERACTIVE_PROCESS: u32 = 0x100;
+
+/// `type=` of `sc create` as the service type of the Service Control Manager.
+fn service_type(name: &str) -> Option<u32> {
+    Some(match name.to_lowercase().as_str() {
+        "own" => SERVICE_WIN32_OWN_PROCESS,
+        "share" => SERVICE_WIN32_SHARE_PROCESS,
+        "interact own" => SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS,
+        "interact share" => SERVICE_WIN32_SHARE_PROCESS | SERVICE_INTERACTIVE_PROCESS,
+        "userown" => SERVICE_USER_OWN_PROCESS,
+        "usershare" => SERVICE_USER_SHARE_PROCESS,
+        "kernel" => SERVICE_KERNEL_DRIVER,
+        "filesys" => SERVICE_FILE_SYSTEM_DRIVER,
+        "rec" => SERVICE_RECOGNIZER_DRIVER,
+        "adapt" => SERVICE_ADAPTER,
+        _ => return None,
+    })
+}
+
+/// A handle of the Service Control Manager or of a service, closed when it goes out of scope.
+struct Sc(SC_HANDLE);
+impl Drop for Sc {
+    fn drop(&mut self) {
+        unsafe {
+            CloseServiceHandle(self.0);
+        }
+    }
+}
+
+/// Service Control Manager call; the error is the system code.
+fn scm_do(name: &str, flag: &str, file: &str, typ: &str) -> Result<(), u32> {
+    unsafe {
+        let scm_access = if flag == "create" { SC_MANAGER_CREATE_SERVICE } else { SC_MANAGER_CONNECT };
+        let scm = OpenSCManagerW(null(), null(), scm_access);
+        if scm.is_null() {
+            return Err(GetLastError());
+        }
+        let scm = Sc(scm);
+        let wname = util::w(name);
+        let open = |access: u32| -> Result<Sc, u32> {
+            let h = OpenServiceW(scm.0, wname.as_ptr(), access);
+            if h.is_null() {
+                Err(GetLastError())
+            } else {
+                Ok(Sc(h))
+            }
+        };
+        match flag {
+            "create" => {
+                let kind = service_type(typ).ok_or(87u32)?; // ERROR_INVALID_PARAMETER
+                let wfile = util::w(file);
+                // like `sc create`: started by hand, normal error control, display name = name
+                let h = CreateServiceW(
+                    scm.0, wname.as_ptr(), wname.as_ptr(), SERVICE_ALL_ACCESS, kind, SERVICE_DEMAND_START,
+                    SERVICE_ERROR_NORMAL, wfile.as_ptr(), null(), null_mut(), null(), null(), null(),
+                );
+                if h.is_null() {
+                    return Err(GetLastError());
+                }
+                drop(Sc(h));
+                Ok(())
+            }
+            "delete" => {
+                let svc = open(DELETE)?;
+                if DeleteService(svc.0) == 0 {
+                    return Err(GetLastError());
+                }
+                Ok(())
+            }
+            "start" => {
+                let svc = open(SERVICE_START)?;
+                if StartServiceW(svc.0, 0, null()) == 0 {
+                    return Err(GetLastError());
+                }
+                Ok(())
+            }
+            "stop" => {
+                let svc = open(SERVICE_STOP)?;
+                let mut status: SERVICE_STATUS = std::mem::zeroed();
+                if ControlService(svc.0, SERVICE_CONTROL_STOP, &mut status) == 0 {
+                    return Err(GetLastError());
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 pub fn service(ctx: &mut Ctx, args: &[String]) {
     let name = ctx.expand(arg(args, 0));
-    let flag = ctx.expand(arg(args, 1));
+    let flag = ctx.expand(arg(args, 1)).to_lowercase();
     let file = ctx.expand(arg(args, 2));
     let mut typ = ctx.expand(arg(args, 3));
-    if typ == NULL || typ.is_empty() {
+    if is_null(&typ) || typ.is_empty() {
         typ = "own".into();
     }
-    let sc = sys::system32("sc.exe");
-    let l = flag.to_lowercase();
-    match l.as_str() {
-        "create" if service_exe_exists(&file) => {
-            let mut a: Vec<String> = vec!["create".into(), name, "binPath=".into(), file];
-            match typ.to_lowercase().as_str() {
-                "interact own" => a.extend(["type=".into(), "interact".into(), "type=".into(), "own".into()]),
-                "interact share" => a.extend(["type=".into(), "interact".into(), "type=".into(), "share".into()]),
-                t => a.extend(["type=".into(), t.to_string()]),
-            }
-            let refs: Vec<&str> = a.iter().map(|s| s.as_str()).collect();
-            sys::run_hidden_wait(&sc, &refs);
-        }
-        "delete" | "start" | "stop" => {
-            sys::run_hidden_wait(&sc, &[l.as_str(), &name]);
-        }
-        _ => {}
+    if flag == "create" && !service_exe_exists(&file) {
+        return;
+    }
+    if let Err(code) = scm_do(&name, &flag, &file, &typ) {
+        ctx.log_err(&format!("service \"{}\" {}", name, flag), &format!("error {}", code));
     }
 }
 
 pub fn symlink(ctx: &mut Ctx, args: &[String]) {
-    let flag = if args.len() > 2 { args[2].clone() } else { "Create".to_string() };
+    let flag = if args.len() > 2 { ctx.expand(&args[2]) } else { "Create".to_string() };
     let link = full_logical(ctx, arg(args, 0));
     let target = full_logical(ctx, arg(args, 1));
     if eq_ic(&flag, "remove") {
-        let is_dir = args.get(3).map(|s| s.trim() != "0").unwrap_or(true);
+        let kind = if args.len() > 3 { ctx.expand(&args[3]) } else { String::new() };
+        let is_dir = kind.trim() != "0";
         remove_symlink(&link, is_dir);
         return;
     }
@@ -298,6 +374,19 @@ pub fn symlink(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     let is_dir = util::is_dir(&target);
+    // A link left by a run that did not finish is replaced; anything else that is there is left alone.
+    match std::fs::symlink_metadata(&link) {
+        Ok(md) if md.file_type().is_symlink() => {
+            use std::os::windows::fs::MetadataExt;
+            // a link to a folder carries the "directory" attribute
+            remove_symlink(&link, md.file_attributes() & 0x10 != 0)
+        }
+        Ok(_) => {
+            ctx.msg(&format!("The symbolic link \"{}\" could not be created: there is a file or folder with that name.", link));
+            return;
+        }
+        Err(_) => {}
+    }
     let parent = util::parent_dir(&link);
     if !parent.is_empty() {
         let _ = std::fs::create_dir_all(&parent);
@@ -312,8 +401,14 @@ pub fn symlink(ctx: &mut Ctx, args: &[String]) {
     };
     if created {
         ctx.after_prog.push(Prog::SymlinkRemove { link, is_dir });
-    } else if !sys::is_admin() {
-        ctx.msg("The symbolic link could not be created. Administrator rights (or Windows Developer Mode) are required.");
+    } else {
+        let code = unsafe { GetLastError() };
+        ctx.log_err(&format!("create symbolic link \"{}\"", link), &format!("error {}", code));
+        if !sys::is_admin() {
+            ctx.msg("The symbolic link could not be created. Administrator rights (or Windows Developer Mode) are required.");
+        } else {
+            ctx.msg(&format!("The symbolic link \"{}\" could not be created (error {}).", link, code));
+        }
     }
 }
 

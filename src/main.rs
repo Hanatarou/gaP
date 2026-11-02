@@ -9,7 +9,7 @@ mod crypto;
 mod ctx;
 mod gui;
 mod ini;
-mod langtable;
+mod ipc;
 mod ops_fs;
 mod ops_misc;
 mod ops_reg;
@@ -20,7 +20,7 @@ mod ui;
 mod util;
 mod vars;
 
-use ctx::{exit_now, Ctx, Section};
+use ctx::{exit_code, exit_now, Ctx, Section, EXIT_CONFIG};
 use util::eq_ic;
 
 static HELP_TXT: &[u8] = include_bytes!("../res/gaP_Help.txt");
@@ -37,13 +37,12 @@ fn main() {
     } else if eq_ic(&cmd, "-about") {
         gui::run_about(&ctx.script_full);
     } else if eq_ic(&cmd, "-help") {
-        sys::reduce_memory();
         // FileInstall(..., flag 0): does not overwrite.
         let p = format!("{}\\gaP_Help.txt", ctx.script_dir.trim_end_matches('\\'));
         if !std::path::Path::new(&p).exists() {
             let _ = std::fs::write(&p, HELP_TXT);
         }
-        clean::clean_all(&ctx.script_full);
+        clean::clean_all(&ctx.script_full, None);
         exit_now();
     }
 
@@ -52,15 +51,18 @@ fn main() {
 
 /// Normal flow (`Case Else` of the original Switch).
 fn launcher(ctx: &mut Ctx) {
-    sys::reduce_memory();
+    let has_ini = util::is_file(&ctx.ini_path);
+    if has_ini {
+        // The .ini is read once; every `[GENERAL]` key and both task sections come from this copy.
+        ctx.ini = ini::IniDoc::load(&ctx.ini_path);
+    }
     checks::read_only_init(ctx);
 
-    if util::is_file(&ctx.ini_path) {
+    if has_ini {
         if std::fs::File::open(&ctx.ini_path).is_err() {
             ctx.msg(&format!("An error occurred when opening and reading the \"{}.ini\" file.", ctx.exe_name));
-            exit_now();
+            exit_code(EXIT_CONFIG);
         }
-        checks::java_early(ctx);
         checks::main_app_init(ctx);
         checks::cmdline_init(ctx);
         checks::workdir_init(ctx);
@@ -73,36 +75,38 @@ fn launcher(ctx: &mut Ctx) {
         checks::os_init(ctx);
         checks::wait_init(ctx);
     } else {
-        if !ctx.is_readonly
-            && ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?")
-            && std::fs::write(&ctx.ini_path, INI_TEMPLATE).is_err()
-        {
+        let mut created = false;
+        if !ctx.is_readonly && ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?") {
             // IMPROVEMENT: the original ignored the failure to create the .ini.
-            ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name));
+            match std::fs::write(&ctx.ini_path, INI_TEMPLATE) {
+                Ok(()) => created = true,
+                Err(_) => ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name)),
+            }
         }
-        clean::clean_all(&ctx.script_full);
-        exit_now();
+        clean::clean_all(&ctx.script_full, None);
+        exit_code(if created { 0 } else { EXIT_CONFIG });
     }
 
-    sys::reduce_memory();
-    clean::clean_all(&ctx.script_full);
+    clean_traces(ctx);
 
     ctx.before = tasks::init_section(ctx, Section::Before);
     ctx.after = tasks::init_section(ctx, Section::After);
-    sys::reduce_memory();
 
     tasks::process_before(ctx);
-    sys::reduce_memory();
 
     run_main_app(ctx);
 
-    sys::reduce_memory();
-    clean::clean_all(&ctx.script_full);
+    clean_traces(ctx);
 
     if ctx.run_after {
         tasks::process_after(ctx);
     }
-    clean::clean_all(&ctx.script_full);
+    clean_traces(ctx);
+}
+
+/// Cleans the registry traces of gaP and of the main application (once it is known).
+fn clean_traces(ctx: &Ctx) {
+    clean::clean_all(&ctx.script_full, ctx.main_app.as_deref());
 }
 
 fn main_command_line(ctx: &Ctx) -> String {
@@ -130,37 +134,30 @@ fn start_main(ctx: &Ctx) {
     }
 }
 
-/// Reads (and consumes) the `@#$gapnew@#$` file left by another instance.
-fn take_new_cmdline(path: &str, remove_dir: bool) -> Option<String> {
-    if !std::path::Path::new(path).is_file() {
-        return None;
-    }
-    let bytes = std::fs::read(path).ok()?;
-    if remove_dir {
-        if let Some(par) = std::path::Path::new(path).parent() {
-            let _ = std::fs::remove_dir_all(par);
-        }
-    } else {
-        let _ = std::fs::remove_file(path);
-    }
-    Some(util::ansi_to_string(&bytes))
-}
-
-/// `RunMainAppProc`.
+/// `RunMainAppProc`: starts the main application and waits for it. While it runs, command lines sent by other
+/// instances (`!multiple`) start it again.
 fn run_main_app(ctx: &mut Ctx) {
     start_main(ctx);
     if !ctx.wait_main {
         return;
     }
-    let (local, shared) = checks::gapnew_paths(ctx, std::process::id());
-    while !sys::live_children().is_empty() {
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        let mut new = take_new_cmdline(&local, false);
-        if new.is_none() {
-            new = take_new_cmdline(&shared, true);
+    loop {
+        let running = sys::running_children();
+        if running.is_empty() {
+            break;
         }
-        if let Some(n) = new {
-            ctx.cmd_raw = n;
+        // Sleeps until a process ends or another instance sends a command line. A single wait takes up to 63
+        // processes: with more, it also wakes up twice a second to look at the rest.
+        let event = ctx.ipc.as_ref().map(|s| s.event());
+        sys::wait_any(&running, event, if running.len() > 63 { 500 } else { sys::FOREVER });
+        let mut received = Vec::new();
+        if let Some(server) = &ctx.ipc {
+            while let Some(cmd) = server.try_recv() {
+                received.push(cmd);
+            }
+        }
+        for cmd in received {
+            ctx.cmd_raw = cmd;
             start_main(ctx);
         }
     }

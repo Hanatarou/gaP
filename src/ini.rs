@@ -49,6 +49,11 @@ fn strip_quotes(v: &str) -> String {
 }
 
 impl IniDoc {
+    /// A document with no lines (before the .ini is loaded).
+    pub fn empty() -> IniDoc {
+        IniDoc { lines: Vec::new(), enc: Enc::Ansi, existed: false }
+    }
+
     pub fn load(path: &str) -> IniDoc {
         match util::read_text(path) {
             Some((s, enc)) => IniDoc { lines: util::split_lines_keep(&s), enc, existed: true },
@@ -224,7 +229,52 @@ impl IniDoc {
     }
 }
 
-/// Shortcut: IniRead(file, section, key, default).
-pub fn read(path: &str, section: &str, key: &str, default: &str) -> String {
-    IniDoc::load(path).get(Some(section), key).unwrap_or_else(|| default.to_string())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc(text: &str) -> IniDoc {
+        IniDoc { lines: util::split_lines_keep(text), enc: Enc::Utf8, existed: true }
+    }
+
+    fn text(d: &IniDoc) -> String {
+        d.lines.iter().map(|(l, e)| format!("{}{}", l, e)).collect()
+    }
+
+    #[test]
+    fn get_ignores_case_and_strips_quotes() {
+        let d = doc("; c\r\n[General]\r\nApplication = \"App\\a.exe\"\r\nother=1\r\n[AFTER]\r\nx=2\r\n");
+        assert_eq!(d.get(Some("GENERAL"), "application").as_deref(), Some("App\\a.exe"));
+        assert_eq!(d.get(Some("general"), "OTHER").as_deref(), Some("1"));
+        assert_eq!(d.get(Some("GENERAL"), "x"), None);
+        assert_eq!(d.get(Some("AFTER"), "x").as_deref(), Some("2"));
+        assert_eq!(d.get(Some("MISSING"), "x"), None);
+    }
+
+    #[test]
+    fn section_pairs_keep_order_and_skip_comments() {
+        let d = doc("[BEFORE]\n; note\nb=2\na=1\n\n[AFTER]\nc=3\n");
+        let p = d.section_pairs("before").unwrap();
+        assert_eq!(p, vec![("b".to_string(), "2".to_string()), ("a".to_string(), "1".to_string())]);
+        assert!(d.section_pairs("nope").is_none());
+    }
+
+    #[test]
+    fn set_replaces_or_appends_inside_the_section() {
+        let mut d = doc("[A]\r\nk=1\r\n\r\n[B]\r\nz=9\r\n");
+        d.set(Some("A"), "k", "2");
+        d.set(Some("A"), "n", "3");
+        d.set(Some("C"), "q", "4");
+        assert_eq!(text(&d), "[A]\r\nk=2\r\nn=3\r\n\r\n[B]\r\nz=9\r\n\r\n[C]\r\nq=4\r\n");
+    }
+
+    #[test]
+    fn delete_key_and_section() {
+        let mut d = doc("[A]\nk=1\nj=2\n[B]\nz=9\n");
+        assert!(d.delete_key(Some("A"), "K"));
+        assert!(!d.delete_key(Some("A"), "k"));
+        assert!(d.delete_section("a"));
+        assert_eq!(text(&d), "[B]\nz=9\n");
+        assert!(!d.delete_section("A"));
+    }
 }

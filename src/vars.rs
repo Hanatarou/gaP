@@ -2,26 +2,24 @@
 //! (encrypted text), `%ShellFolder%`, `%ENVIRONMENT_VARIABLE%` and escapes
 //! `<{` and `<}`.
 
-use crate::ctx::{exit_now, Ctx, FUNC_MACROS};
-use crate::langtable::LANGS;
-use crate::{crypto, sys, ui, util};
+use crate::ctx::{exit_code, Ctx, EXIT_CANCELLED, EXIT_CONFIG, FUNC_MACROS, SHELL_FOLDERS};
+use crate::{checks, crypto, sys, ui, util};
 
 /// Looks for unescaped `open … close` (a delimiter right after a '<' is escaped).
-/// Returns (start, end_exclusive, inner content).
+/// Returns (start, end_exclusive, inner content), the positions in bytes. `{`, `}` and `<` are ASCII, so
+/// scanning the bytes is enough and the text is never decoded.
 fn find_braced(s: &str, depth: usize) -> Option<(usize, usize, String)> {
-    let chars: Vec<char> = s.chars().collect();
-    let n = chars.len();
-    let unescaped = |i: usize| -> bool { i == 0 || chars[i - 1] != '<' };
+    let b = s.as_bytes();
+    let n = b.len();
+    let unescaped = |i: usize| -> bool { i == 0 || b[i - 1] != b'<' };
+    let run = |i: usize, c: u8| -> bool { b[i..i + depth].iter().all(|&x| x == c) };
     let mut i = 0;
     while i + depth <= n {
-        if (0..depth).all(|k| chars[i + k] == '{') && unescaped(i) {
+        if run(i, b'{') && unescaped(i) {
             let mut j = i + depth;
             while j + depth <= n {
-                if (0..depth).all(|k| chars[j + k] == '}') && unescaped(j) {
-                    let inner: String = chars[i + depth..j].iter().collect();
-                    let start_b: usize = chars[..i].iter().map(|c| c.len_utf8()).sum();
-                    let end_b: usize = chars[..j + depth].iter().map(|c| c.len_utf8()).sum();
-                    return Some((start_b, end_b, inner));
+                if run(j, b'}') && unescaped(j) {
+                    return Some((i, j + depth, s[i + depth..j].to_string()));
                 }
                 j += 1;
             }
@@ -93,11 +91,6 @@ pub fn undefined_env_names(s: &str) -> Vec<String> {
     found
 }
 
-fn lang_row() -> Option<(&'static str, &'static str)> {
-    let code = sys::os_lang();
-    LANGS.iter().find(|(c, _, _)| *c == code).map(|(_, n, d)| (*n, *d))
-}
-
 impl Ctx {
     /// Value of a "function" macro (computed on every use).
     fn func_macro(&mut self, name: &str) -> String {
@@ -124,26 +117,19 @@ impl Ctx {
             "i" => format!("{:02}", t.min),
             "s" => format!("{:02}", t.sec),
             "U" => util::unix_now().to_string(),
-            "LANG" => match lang_row() {
-                // "English - United States" -> "English"
-                Some((_, d)) => d.rfind(" -").map(|i| d[..i].to_string()).unwrap_or_else(|| d.to_string()),
-                None => "-1".into(),
-            },
-            "LOCALE" => match lang_row() {
+            // The language of the system comes from the system itself: "pt-BR", "Portuguese", "Brazil".
+            "LANG" => sys::locale().map(|(_, lang, _)| lang).unwrap_or_else(|| "-1".into()),
+            "LOCALE" => match sys::locale() {
                 // "en-US" -> "EN"
-                Some((n, _)) => n.split('-').next().unwrap_or(n).to_uppercase(),
+                Some((n, _, _)) => n.split('-').next().unwrap_or(&n).to_uppercase(),
                 None => "-1".into(),
             },
-            "LOCALENAME" => lang_row().map(|(n, _)| n.to_string()).unwrap_or_else(|| "-1".into()),
-            "LOCALENAME_SHORT" => match lang_row() {
-                Some((n, _)) => n.split('-').next().unwrap_or(n).to_lowercase(),
+            "LOCALENAME" => sys::locale().map(|(n, _, _)| n).unwrap_or_else(|| "-1".into()),
+            "LOCALENAME_SHORT" => match sys::locale() {
+                Some((n, _, _)) => n.split('-').next().unwrap_or(&n).to_lowercase(),
                 None => "-1".into(),
             },
-            "COUNTRY" => match lang_row() {
-                // "English - United States" -> "United States"
-                Some((_, d)) => d.find("- ").map(|i| d[i + 2..].to_string()).unwrap_or_else(|| d.to_string()),
-                None => "-1".into(),
-            },
+            "COUNTRY" => sys::locale().map(|(_, _, country)| country).unwrap_or_else(|| "-1".into()),
             _ => String::new(),
         }
     }
@@ -152,6 +138,12 @@ impl Ctx {
     fn lookup_macro(&mut self, name: &str) -> Option<String> {
         if let Some(v) = self.get_var(name) {
             return Some(v.to_string());
+        }
+        if name == "JAVAEXE" {
+            // looked for in the registry the first time it is used
+            let exe = checks::java_exe_text();
+            self.add_var("JAVAEXE", &exe);
+            return Some(exe);
         }
         if FUNC_MACROS.contains(&name) {
             return Some(self.func_macro(name));
@@ -168,7 +160,7 @@ impl Ctx {
         }
         for _ in 0..3 {
             let Some(pw) = ui::input_box("Please, enter the password to decrypt data:", "Password:", true) else {
-                exit_now();
+                exit_code(EXIT_CANCELLED);
             };
             if let Some(t) = crypto::decrypt(token, &pw) {
                 self.pw_cache = Some(pw);
@@ -176,7 +168,7 @@ impl Ctx {
             }
             ui::info(&self.title, "Wrong password or corrupted encrypted text. Please, try again.");
         }
-        exit_now();
+        exit_code(EXIT_CONFIG);
     }
 
     /// `FindReplaceX`. `reg_key` = true removes the suffix "64" from the registry root
@@ -231,13 +223,19 @@ impl Ctx {
             }
             break;
         }
-        // shell folders and environment variables
-        for (name, val) in self.shell.clone() {
-            if !val.is_empty() {
-                s = util::replace_all_ic(&s, &format!("%{}%", name), &val);
+        // shell folders and environment variables; a folder is read from the system only if it is used
+        if s.contains('%') {
+            for (i, (name, _, _)) in SHELL_FOLDERS.iter().enumerate() {
+                let token = format!("%{}%", name);
+                if util::contains_ic(&s, &token) {
+                    let val = self.shell_value(i).to_string();
+                    if !val.is_empty() {
+                        s = util::replace_all_ic(&s, &token, &val);
+                    }
+                }
             }
+            s = expand_env(&s);
         }
-        s = expand_env(&s);
         // NEW (gaP-rs): `%NAME%` that is neither a shell folder nor an environment variable is
         // reported like an undefined `{VAR}` (before, it was silently kept as literal text).
         if let Some(name) = undefined_env_names(&s).first() {

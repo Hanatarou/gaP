@@ -1,7 +1,10 @@
 //! Global state of the launcher (`Ctx`) — equivalent to the `Global` variables of the
 //! AutoIt script — and types of the BEFORE/AFTER task queues.
 
-use crate::{crypto, reg, sys, ui, util};
+use std::cell::{OnceCell, RefCell};
+
+use crate::ini::IniDoc;
+use crate::{crypto, ipc, reg, sys, ui, util};
 
 pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
 pub const PROGRAM_VERSION: &str = "2.0.0.0";
@@ -79,8 +82,6 @@ pub enum Prog {
 pub enum TaskKind {
     /// Item written by the user in the .ini: normalized keyword + arguments.
     User { kw: String, args: Vec<String>, raw_key: String, raw_val: String },
-    #[allow(dead_code)]
-    Prog(Prog),
     Done,
 }
 
@@ -99,16 +100,24 @@ impl Section {
     }
 }
 
+/// The debug log. The file stays open for the whole run and every line is one write, so nothing is lost when the
+/// program ends with `process::exit`.
 pub struct Logger {
-    pub path: String,
+    file: RefCell<std::fs::File>,
 }
 
 impl Logger {
+    pub fn open(path: &str) -> Option<Logger> {
+        let f = std::fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
+        Some(Logger { file: RefCell::new(f) })
+    }
+
     pub fn write(&self, text: &str) {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.path) {
-            let _ = writeln!(f, "{}", text);
-        }
+        let mut line = String::with_capacity(text.len() + 1);
+        line.push_str(text);
+        line.push('\n');
+        let _ = self.file.borrow_mut().write_all(line.as_bytes());
     }
 }
 
@@ -118,7 +127,10 @@ pub struct Ctx {
     pub exe_name: String,
     pub title: String,
     pub ini_path: String,
-    pub file_hash: String,
+    /// The .ini, loaded once (after the program knows it exists).
+    pub ini: IniDoc,
+    /// SHA-1 of the executable; only computed when something needs it (see `file_hash`).
+    file_hash: OnceCell<String>,
     pub cmd_raw: String,
     pub os_arch: &'static str,
     /// Architecture of the chosen main application: "x64" only if the 2nd segment of
@@ -132,8 +144,8 @@ pub struct Ctx {
     pub debug: Option<Logger>,
 
     pub vars: Vec<(String, String)>,
-    pub shell: Vec<(String, String)>,
-    pub common_appdata: String,
+    /// Value of each entry of `SHELL_FOLDERS`; `None` until it is used for the first time.
+    shell: Vec<Option<String>>,
 
     pub main_app: Option<String>,
     pub main_cmdline: String,
@@ -146,6 +158,8 @@ pub struct Ctx {
     /// Automatic tasks of the AFTER section ("PROG" lines): always before the user's.
     pub after_prog: Vec<Prog>,
     pub pw_cache: Option<String>,
+    /// Receives the command lines sent by the other instances (only the first instance has it).
+    pub ipc: Option<ipc::Server>,
 }
 
 impl Ctx {
@@ -162,12 +176,13 @@ impl Ctx {
         let title = format!("{} - {}", exe_name, PROGRAM_NAME);
         let ini_path = format!("{}\\{}.ini", script_dir.trim_end_matches('\\'), exe_name);
         let mut c = Ctx {
-            file_hash: crypto::sha1_file(&script_full),
             script_full,
             script_dir,
             exe_name,
             title,
             ini_path,
+            ini: IniDoc::empty(),
+            file_hash: OnceCell::new(),
             cmd_raw: sys::cmdline_raw(),
             os_arch: sys::os_arch(),
             app_arch: "x86",
@@ -177,8 +192,7 @@ impl Ctx {
             wait_main: true,
             debug: None,
             vars: Vec::new(),
-            shell: Vec::new(),
-            common_appdata: String::new(),
+            shell: vec![None; SHELL_FOLDERS.len()],
             main_app: None,
             main_cmdline: String::new(),
             main_workdir: String::new(),
@@ -188,10 +202,15 @@ impl Ctx {
             after: Vec::new(),
             after_prog: Vec::new(),
             pw_cache: None,
+            ipc: None,
         };
         c.init_vars();
-        c.init_shell_folders();
         c
+    }
+
+    /// SHA-1 of the executable (it names the single-instance objects).
+    pub fn file_hash(&self) -> &str {
+        self.file_hash.get_or_init(|| crypto::sha1_file(&self.script_full))
     }
 
     /// `VarFuncIni()`: initial value macros.
@@ -205,23 +224,34 @@ impl Ctx {
         self.add_var("OSARCH", self.os_arch);
     }
 
-    /// `CreateShellFolders()`: reads "Shell Folders" (HKCU/HKLM); uses the shell API
-    /// as a fallback when the registry key does not exist.
-    fn init_shell_folders(&mut self) {
-        for (name, csidl, hklm) in SHELL_FOLDERS {
-            let key = if *hklm {
+    /// Value of the shell folder `SHELL_FOLDERS[i]`: read from "Shell Folders" (HKCU/HKLM) the first time it is
+    /// used, with the shell API as a fallback when the registry value does not exist.
+    pub fn shell_value(&mut self, i: usize) -> &str {
+        if self.shell[i].is_none() {
+            let (name, csidl, hklm) = SHELL_FOLDERS[i];
+            let key = if hklm {
                 "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
             } else {
                 "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"
             };
             let val = reg::read_string(key, name, reg::View::Native)
                 .filter(|s| !s.is_empty())
-                .or_else(|| sys::csidl_path(*csidl))
+                .or_else(|| sys::csidl_path(csidl))
                 .unwrap_or_default();
-            self.shell.push((name.to_string(), val));
+            self.shell[i] = Some(val);
         }
-        let ca = self.shell.iter().find(|(n, _)| n == "Common AppData").map(|(_, v)| v.clone()).unwrap_or_default();
-        self.common_appdata = format!("{}\\", ca);
+        self.shell[i].as_deref().unwrap_or("")
+    }
+
+    /// Every shell folder as (name, value): only the debug log needs them all.
+    pub fn shell_all(&mut self) -> Vec<(String, String)> {
+        (0..SHELL_FOLDERS.len()).map(|i| (SHELL_FOLDERS[i].0.to_string(), self.shell_value(i).to_string())).collect()
+    }
+
+    /// "Common AppData" with a trailing backslash (where the program writes when its own drive is read only).
+    pub fn common_appdata(&mut self) -> String {
+        let i = SHELL_FOLDERS.iter().position(|(n, _, _)| *n == "Common AppData").unwrap_or(0);
+        format!("{}\\", self.shell_value(i))
     }
 
     pub fn add_var(&mut self, name: &str, value: &str) {
@@ -246,6 +276,11 @@ impl Ctx {
         }
     }
 
+    /// Writes a failure that the program does not show to the debug log.
+    pub fn log_err(&self, what: &str, err: &dyn std::fmt::Display) {
+        self.log(&format!("ERROR {}: {}", what, err));
+    }
+
     /// A path as the main application sees it (see `util::rewrite_system32`).
     pub fn io_path(&self, p: &str) -> String {
         sys::io_path(self.app_arch, p)
@@ -257,7 +292,19 @@ impl Ctx {
     }
 }
 
-/// `Exit`: quits without additional cleanup (as in AutoIt).
+/// Exit codes. They are `0` for a run that ended normally and different values for the ways it can end early, so
+/// a script that starts gaP can tell them apart.
+pub const EXIT_CONFIG: i32 = 2; // the .ini or the path of the main application is wrong
+pub const EXIT_REQUIREMENT: i32 = 3; // a requirement of the main application is not met (administrator, OS, Java...)
+pub const EXIT_CANCELLED: i32 = 4; // the user cancelled a question or a password
+pub const EXIT_RUNNING: i32 = 5; // another instance is already running
+
+/// `Exit`: quits without additional cleanup (as in AutoIt), with code 0.
 pub fn exit_now() -> ! {
-    std::process::exit(0)
+    exit_code(0)
+}
+
+/// Quits without additional cleanup with the given exit code.
+pub fn exit_code(code: i32) -> ! {
+    std::process::exit(code)
 }

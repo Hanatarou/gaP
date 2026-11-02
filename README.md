@@ -123,6 +123,10 @@ regkey = HKLM\Software\MyApp :: Data\settings.reg :: x64
 | `-about` | Shows the about window |
 | `-help` | Creates a copy of the help file next to `gaP.exe` |
 
+Other command lines given while gaP is already running are not started as a second copy: they are sent to the running one through a named pipe (only reachable by the same user and never over the network), and that copy hands them to the application.
+
+Exit codes of `gaP.exe`: `0` ok, `2` the `.ini` or the path of the main application is wrong, `3` a requirement of the application is not met (administrator, OS, Java...), `4` the user cancelled a question or a password, `5` another instance is already running.
+
 ### Keywords
 
 | Section | Keywords |

@@ -9,12 +9,29 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use windows_sys::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte};
+use windows_sys::Win32::Globalization::{
+    CompareStringOrdinal, FindStringOrdinal, MultiByteToWideChar, WideCharToMultiByte, CSTR_EQUAL, FIND_FROMSTART,
+};
 use windows_sys::Win32::Storage::FileSystem::{
-    GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY, INVALID_FILE_ATTRIBUTES,
+    GetFileAttributesW, MoveFileExW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY, INVALID_FILE_ATTRIBUTES,
+    MOVEFILE_COPY_ALLOWED, MOVEFILE_REPLACE_EXISTING,
 };
 
 // ---------------------------------------------------------------- strings
+
+/// The word the `.ini` uses for "no value" in an optional segment.
+pub const NULL: &str = "NULL";
+
+/// `$x = "NULL"` of the AutoIt original: the `=` between strings ignores the case, so `null` and
+/// `Null` mean "no value" too.
+pub fn is_null(s: &str) -> bool {
+    eq_ic(s, NULL)
+}
+
+/// Segment `i` of a keyword, or "NULL" when the segment was not written.
+pub fn arg(a: &[String], i: usize) -> &str {
+    a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
+}
 
 /// `&str` -> zero-terminated UTF-16.
 pub fn w(s: &str) -> Vec<u16> {
@@ -27,44 +44,50 @@ pub fn from_w(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..n])
 }
 
-/// Case-insensitive comparison (the AutoIt `=` between strings).
+fn utf16(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
+/// Case-insensitive comparison (the AutoIt `=` between strings). ASCII is compared directly; any other
+/// text goes to the operating system, which folds the case the way the file systems do.
 pub fn eq_ic(a: &str, b: &str) -> bool {
-    let mut x = a.chars().flat_map(|c| c.to_lowercase());
-    let mut y = b.chars().flat_map(|c| c.to_lowercase());
-    loop {
-        match (x.next(), y.next()) {
-            (None, None) => return true,
-            (Some(p), Some(q)) if p == q => {}
-            _ => return false,
-        }
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
     }
+    let (x, y) = (utf16(a), utf16(b));
+    unsafe { CompareStringOrdinal(x.as_ptr(), x.len() as i32, y.as_ptr(), y.len() as i32, 1) == CSTR_EQUAL }
 }
 
-fn lc(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
-}
-
-/// Case-insensitive `StringInStr(hay, needle)`: position (in chars) or None.
-pub fn find_ic(hay: &str, needle: &str) -> Option<usize> {
-    if needle.is_empty() {
+/// Position (in UTF-16 units) of the first case-insensitive `needle` in `hay[from..]`.
+fn find_u16(hay: &[u16], from: usize, needle: &[u16]) -> Option<usize> {
+    if needle.is_empty() || from >= hay.len() {
         return None;
     }
-    let h: Vec<char> = hay.chars().map(lc).collect();
-    let n: Vec<char> = needle.chars().map(lc).collect();
-    if n.len() > h.len() {
-        return None;
-    }
-    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()] == n[..])
+    let r = unsafe {
+        FindStringOrdinal(FIND_FROMSTART, hay[from..].as_ptr(), (hay.len() - from) as i32, needle.as_ptr(), needle.len() as i32, 1)
+    };
+    (r >= 0).then(|| from + r as usize)
 }
 
+/// Case-insensitive `StringInStr(hay, needle)` as a yes/no (an empty needle is never found).
 pub fn contains_ic(hay: &str, needle: &str) -> bool {
-    find_ic(hay, needle).is_some()
+    if needle.is_empty() {
+        return false;
+    }
+    if hay.is_ascii() && needle.is_ascii() {
+        return hay.len() >= needle.len()
+            && hay.as_bytes().windows(needle.len()).any(|win| win.eq_ignore_ascii_case(needle.as_bytes()));
+    }
+    find_u16(&utf16(hay), 0, &utf16(needle)).is_some()
 }
 
 pub fn starts_with_ic(hay: &str, prefix: &str) -> bool {
-    let h: Vec<char> = hay.chars().map(lc).collect();
-    let p: Vec<char> = prefix.chars().map(lc).collect();
-    h.len() >= p.len() && h[..p.len()] == p[..]
+    if hay.is_ascii() && prefix.is_ascii() {
+        return hay.len() >= prefix.len() && hay.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes());
+    }
+    let (h, p) = (utf16(hay), utf16(prefix));
+    h.len() >= p.len()
+        && unsafe { CompareStringOrdinal(h.as_ptr(), p.len() as i32, p.as_ptr(), p.len() as i32, 1) == CSTR_EQUAL }
 }
 
 /// `StringReplace(s, find, rep, 0, 0)`: replaces all, ignoring case.
@@ -72,21 +95,20 @@ pub fn replace_all_ic(s: &str, find: &str, rep: &str) -> String {
     if find.is_empty() {
         return s.to_string();
     }
-    let chars: Vec<char> = s.chars().collect();
-    let low: Vec<char> = chars.iter().map(|&c| lc(c)).collect();
-    let f: Vec<char> = find.chars().map(lc).collect();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < chars.len() {
-        if i + f.len() <= chars.len() && low[i..i + f.len()] == f[..] {
-            out.push_str(rep);
-            i += f.len();
-        } else {
-            out.push(chars[i]);
-            i += 1;
-        }
+    let (h, f, r) = (utf16(s), utf16(find), utf16(rep));
+    let mut out: Vec<u16> = Vec::with_capacity(h.len());
+    let (mut pos, mut any) = (0, false);
+    while let Some(i) = find_u16(&h, pos, &f) {
+        out.extend_from_slice(&h[pos..i]);
+        out.extend_from_slice(&r);
+        pos = i + f.len();
+        any = true;
     }
-    out
+    if !any {
+        return s.to_string();
+    }
+    out.extend_from_slice(&h[pos..]);
+    String::from_utf16_lossy(&out)
 }
 
 /// AutoIt-style numeric conversion: empty/non-numeric = 0.
@@ -170,12 +192,9 @@ pub fn path_full(p: &str, base: &str) -> String {
         out.push('\\');
         out.push_str(c);
     }
+    // "C:\Dir\" keeps the trailing slash only if the original had it; a bare root always has it.
     if stack.is_empty() || trailing {
         out.push('\\');
-    }
-    // "C:\Dir\" -> keeps the trailing slash only if the original had it
-    if !trailing && stack.is_empty() {
-        // drive root
     }
     out
 }
@@ -223,6 +242,10 @@ pub fn has_wildcard(s: &str) -> bool {
     s.contains('*') || s.contains('?')
 }
 
+fn lc(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
 /// Windows-style wildcard (`*` and `?`), case-insensitive.
 pub fn wildcard_match(pat: &str, name: &str) -> bool {
     let p: Vec<char> = pat.chars().map(lc).collect();
@@ -258,9 +281,9 @@ pub enum Kind {
     Both,
 }
 
-/// `_FileListToArray($dir, $filter, $flag, True)`: full paths.
-/// `filter` accepts several patterns separated by `;`.
-pub fn list_dir(dir: &str, filter: &str, kind: Kind) -> Vec<String> {
+/// Entries of `dir` that match `filter` (one or more patterns separated by `;`) and `kind`, as full paths and in
+/// the order the file system gives them. `stop_at_first` ends the scan at the first match.
+fn scan_dir(dir: &str, filter: &str, kind: Kind, stop_at_first: bool) -> Vec<String> {
     let pats: Vec<&str> = filter.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
     let pats = if pats.is_empty() { vec!["*"] } else { pats };
     let mut out = Vec::new();
@@ -275,10 +298,20 @@ pub fn list_dir(dir: &str, filter: &str, kind: Kind) -> Vec<String> {
             };
             if ok_kind && pats.iter().any(|p| wildcard_match(p, &name)) {
                 out.push(format!("{}\\{}", dir.trim_end_matches('\\'), name));
+                if stop_at_first {
+                    break;
+                }
             }
         }
     }
-    out.sort_by_key(|s| s.to_lowercase());
+    out
+}
+
+/// `_FileListToArray($dir, $filter, $flag, True)`: full paths, sorted by name ignoring the case.
+/// `filter` accepts several patterns separated by `;`.
+pub fn list_dir(dir: &str, filter: &str, kind: Kind) -> Vec<String> {
+    let mut out = scan_dir(dir, filter, kind, false);
+    out.sort_by_cached_key(|s| s.to_lowercase());
     out
 }
 
@@ -289,7 +322,7 @@ pub fn exists(p: &str) -> bool {
     }
     if has_wildcard(p) {
         let (par, name) = split_parent(p);
-        return !list_dir(&par, &name, Kind::Both).is_empty();
+        return !scan_dir(&par, &name, Kind::Both, true).is_empty();
     }
     Path::new(p).exists()
 }
@@ -358,40 +391,70 @@ pub fn remove_dir_if_empty(p: &str) -> bool {
 }
 
 /// `DirCopy`: copies the content merging; does not overwrite if `overwrite` = false.
-pub fn copy_dir(src: &Path, dst: &Path, overwrite: bool) -> io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for e in fs::read_dir(src)? {
-        let e = e?;
+/// A failure on one entry does not stop the others: every failure is added to `errors`. Symbolic links and
+/// junctions are not followed (that could leave the tree being copied) and are reported as not copied.
+pub fn copy_dir(src: &Path, dst: &Path, overwrite: bool, errors: &mut Vec<String>) {
+    if let Err(e) = fs::create_dir_all(dst) {
+        errors.push(format!("{}: {}", dst.display(), e));
+        return;
+    }
+    let rd = match fs::read_dir(src) {
+        Ok(rd) => rd,
+        Err(e) => {
+            errors.push(format!("{}: {}", src.display(), e));
+            return;
+        }
+    };
+    for entry in rd {
+        let e = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                errors.push(format!("{}: {}", src.display(), err));
+                continue;
+            }
+        };
         let from = e.path();
         let to = dst.join(e.file_name());
-        let ft = e.file_type()?;
-        if ft.is_dir() {
-            copy_dir(&from, &to, overwrite)?;
+        let ft = match e.file_type() {
+            Ok(t) => t,
+            Err(err) => {
+                errors.push(format!("{}: {}", from.display(), err));
+                continue;
+            }
+        };
+        if ft.is_symlink() {
+            errors.push(format!("{}: symbolic link or junction not copied", from.display()));
+        } else if ft.is_dir() {
+            copy_dir(&from, &to, overwrite, errors);
         } else if overwrite || !to.exists() {
             if to.exists() {
                 clear_readonly(&to.to_string_lossy());
             }
-            fs::copy(&from, &to)?;
+            if let Err(err) = fs::copy(&from, &to) {
+                errors.push(format!("{}: {}", from.display(), err));
+            }
         }
     }
-    Ok(())
 }
 
-/// Moves a directory (rename, or copy+delete across volumes).
+/// Moves a directory (rename, or copy+delete across volumes). The source is deleted only when everything was
+/// copied.
 pub fn move_dir(src: &str, dst: &str) -> io::Result<()> {
     if let Some(par) = Path::new(dst).parent() {
         let _ = fs::create_dir_all(par);
     }
-    match fs::rename(src, dst) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            copy_dir(Path::new(src), Path::new(dst), true)?;
-            if remove_dir_recursive(src) {
-                Ok(())
-            } else {
-                Err(io::Error::other("cannot remove source dir"))
-            }
-        }
+    if fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    let mut errors = Vec::new();
+    copy_dir(Path::new(src), Path::new(dst), true, &mut errors);
+    if !errors.is_empty() {
+        return Err(io::Error::other(errors.join("; ")));
+    }
+    if remove_dir_recursive(src) {
+        Ok(())
+    } else {
+        Err(io::Error::other("cannot remove source dir"))
     }
 }
 
@@ -409,7 +472,8 @@ pub fn copy_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
     fs::copy(src, dst).map(|_| ())
 }
 
-/// `FileMove(…, 8|1)`.
+/// `FileMove(…, 8|1)`. With `overwrite` the destination is replaced in one step by the system (it is never
+/// deleted first, so a failure leaves the old file in place); across volumes the system copies and deletes.
 pub fn move_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
     if !overwrite && Path::new(dst).exists() {
         return Ok(());
@@ -419,15 +483,19 @@ pub fn move_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
     }
     if Path::new(dst).exists() {
         clear_readonly(dst);
-        let _ = fs::remove_file(dst);
     }
-    match fs::rename(src, dst) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            fs::copy(src, dst)?;
+    let flags = MOVEFILE_COPY_ALLOWED | if overwrite { MOVEFILE_REPLACE_EXISTING } else { 0 };
+    if unsafe { MoveFileExW(w(src).as_ptr(), w(dst).as_ptr(), flags) } != 0 {
+        return Ok(());
+    }
+    let first = io::Error::last_os_error();
+    // A read-only source cannot be deleted by the system after the copy: copy it and clear the attribute.
+    match fs::copy(src, dst) {
+        Ok(_) => {
             clear_readonly(src);
             fs::remove_file(src)
         }
+        Err(_) => Err(first),
     }
 }
 
@@ -634,6 +702,184 @@ pub fn rewrite_system32(p: &str, windir: &str, os: &str, gap: &str, app: &str) -
 #[cfg(test)]
 mod tests {
     use super::rewrite_system32 as rw;
+    use super::*;
+
+    #[test]
+    fn path_full_resolves_against_the_base() {
+        assert_eq!(path_full("App\\a.exe", "C:\\Base"), "C:\\Base\\App\\a.exe");
+        assert_eq!(path_full("..\\y", "C:\\Base\\Sub"), "C:\\Base\\y");
+        assert_eq!(path_full(".\\x\\.\\y", "C:\\Base"), "C:\\Base\\x\\y");
+        // rooted: only the drive of the base is kept
+        assert_eq!(path_full("\\Dir", "D:\\Base"), "D:\\Dir");
+        // absolute, forward slashes and the trailing slash
+        assert_eq!(path_full("C:/a/./b/", "X:\\"), "C:\\a\\b\\");
+        assert_eq!(path_full("a\\", "C:\\B"), "C:\\B\\a\\");
+        // a drive root keeps its slash, and ".." cannot climb above it
+        assert_eq!(path_full("C:\\", "D:\\"), "C:\\");
+        assert_eq!(path_full("C:\\..\\..\\x", "D:\\"), "C:\\x");
+        // an empty path is the base
+        assert_eq!(path_full("", "C:\\Base"), "C:\\Base");
+        // UNC
+        assert_eq!(path_full("\\\\srv\\share\\a\\..\\b", "C:\\"), "\\\\srv\\share\\b");
+        assert_eq!(path_full("\\\\srv\\share", "C:\\"), "\\\\srv\\share\\");
+    }
+
+    #[test]
+    fn path_pieces() {
+        assert_eq!(split_parent("C:\\a\\b"), ("C:\\a".to_string(), "b".to_string()));
+        assert_eq!(split_parent("C:\\a\\b\\"), ("C:\\a".to_string(), "b".to_string()));
+        assert_eq!(parent_dir("C:\\a"), "C:\\");
+        assert_eq!(file_name("C:\\a\\b.txt"), "b.txt");
+        assert_eq!(trim_trailing_sep("C:\\"), "C:\\");
+        assert_eq!(trim_trailing_sep("C:\\a\\"), "C:\\a");
+        assert!(has_extension("a.txt") && !has_extension("a") && !has_extension(".gitignore") && !has_extension("a."));
+    }
+
+    #[test]
+    fn wildcards() {
+        assert!(wildcard_match("*", "anything"));
+        assert!(wildcard_match("*.TXT", "notes.txt"));
+        assert!(wildcard_match("a?c", "ABC"));
+        assert!(wildcard_match("config.ini_Backup_*", "config.ini_Backup_2024"));
+        assert!(wildcard_match("a*b*c", "aXXbYYc"));
+        assert!(!wildcard_match("a?c", "ac"));
+        assert!(!wildcard_match("*.txt", "notes.txt.bak"));
+        assert!(!wildcard_match("abc", "abcd"));
+        assert!(has_wildcard("a*") && has_wildcard("a?") && !has_wildcard("a"));
+    }
+
+    #[test]
+    fn numbers_and_segments() {
+        assert_eq!(auto_num("  -2 "), -2);
+        assert_eq!(auto_num("+5x"), 5);
+        assert_eq!(auto_num("abc"), 0);
+        assert_eq!(auto_num(""), 0);
+        assert_eq!(split_args("a :: b :: c"), vec!["a", "b", "c"]);
+        assert_eq!(split_args("a::b"), vec!["a::b"]);
+        let a = vec!["x".to_string()];
+        assert_eq!(arg(&a, 0), "x");
+        assert_eq!(arg(&a, 1), "NULL");
+    }
+
+    #[test]
+    fn ignoring_the_case() {
+        // the AutoIt "=" between strings ignores the case: "null" is "NULL" too
+        assert!(is_null("NULL") && is_null("null") && is_null("Null"));
+        assert!(!is_null("*NULL*") && !is_null(""));
+        assert!(eq_ic("Hello", "hELLO") && !eq_ic("Hello", "Hell"));
+        assert!(contains_ic("C:\\Program Files\\App", "program files") && !contains_ic("abc", ""));
+        assert!(starts_with_ic("Notepad++.exe", "notepad") && !starts_with_ic("No", "Notepad"));
+        assert_eq!(replace_all_ic("%Desktop%\\a\\%DESKTOP%", "%desktop%", "D:"), "D:\\a\\D:");
+        assert_eq!(replace_all_ic("abc", "x", "y"), "abc");
+        assert_eq!(replace_all_ic("abc", "", "y"), "abc");
+        // not only ASCII
+        assert!(eq_ic("Ação", "AÇÃO") && contains_ic("Pasta Ação", "ação"));
+    }
+
+    #[test]
+    fn encodings_roundtrip() {
+        let text = "Olá, ação \u{1F600}";
+        for enc in [Enc::Utf16Le, Enc::Utf16Be, Enc::Utf8Bom, Enc::Utf8] {
+            let (back, found) = decode_bytes(&encode_string(text, enc));
+            assert_eq!((back.as_str(), found), (text, enc));
+        }
+        // plain ASCII is read as ANSI
+        assert_eq!(decode_bytes(b"abc"), ("abc".to_string(), Enc::Ansi));
+    }
+
+    #[test]
+    fn lines_keep_their_terminators() {
+        let l = split_lines_keep("a\r\nb\nc\rd");
+        assert_eq!(
+            l,
+            vec![
+                ("a".to_string(), "\r\n".to_string()),
+                ("b".to_string(), "\n".to_string()),
+                ("c".to_string(), "\r".to_string()),
+                ("d".to_string(), String::new()),
+            ]
+        );
+    }
+
+    /// A folder of its own in the temporary folder, removed at the end.
+    struct Scratch(std::path::PathBuf);
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            let p = std::env::temp_dir().join(format!("gap_test_{}_{}", name, std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            Scratch(p)
+        }
+        fn path(&self, rel: &str) -> String {
+            self.0.join(rel).to_string_lossy().to_string()
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn copy_dir_merges_and_keeps_going() {
+        let t = Scratch::new("copy");
+        std::fs::create_dir_all(t.path("src\\sub")).unwrap();
+        std::fs::write(t.path("src\\a.txt"), "new").unwrap();
+        std::fs::write(t.path("src\\sub\\b.txt"), "b").unwrap();
+        std::fs::create_dir_all(t.path("dst")).unwrap();
+        std::fs::write(t.path("dst\\a.txt"), "old").unwrap();
+        std::fs::write(t.path("dst\\keep.txt"), "keep").unwrap();
+        let mut errors = Vec::new();
+        // without overwrite the existing file stays
+        copy_dir(Path::new(&t.path("src")), Path::new(&t.path("dst")), false, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(std::fs::read_to_string(t.path("dst\\a.txt")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(t.path("dst\\sub\\b.txt")).unwrap(), "b");
+        // with overwrite it is replaced, and what was only in the target is kept
+        copy_dir(Path::new(&t.path("src")), Path::new(&t.path("dst")), true, &mut errors);
+        assert_eq!(std::fs::read_to_string(t.path("dst\\a.txt")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(t.path("dst\\keep.txt")).unwrap(), "keep");
+        // a source that does not exist is reported, not a panic
+        copy_dir(Path::new(&t.path("nope")), Path::new(&t.path("dst2")), true, &mut errors);
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn move_file_replaces_in_one_step() {
+        let t = Scratch::new("move");
+        std::fs::write(t.path("a.txt"), "a").unwrap();
+        std::fs::write(t.path("b.txt"), "b").unwrap();
+        // no overwrite: nothing happens
+        move_file(&t.path("a.txt"), &t.path("b.txt"), false).unwrap();
+        assert_eq!(std::fs::read_to_string(t.path("b.txt")).unwrap(), "b");
+        assert!(is_file(&t.path("a.txt")));
+        // overwrite: the target is replaced and the source is gone
+        move_file(&t.path("a.txt"), &t.path("b.txt"), true).unwrap();
+        assert_eq!(std::fs::read_to_string(t.path("b.txt")).unwrap(), "a");
+        assert!(!is_file(&t.path("a.txt")));
+        // the folders of the target are created
+        std::fs::write(t.path("c.txt"), "c").unwrap();
+        move_file(&t.path("c.txt"), &t.path("x\\y\\c.txt"), true).unwrap();
+        assert!(is_file(&t.path("x\\y\\c.txt")));
+    }
+
+    #[test]
+    fn listing_and_existence_with_wildcards() {
+        let t = Scratch::new("list");
+        for f in ["B.log", "a.log", "c.txt"] {
+            std::fs::write(t.path(f), "").unwrap();
+        }
+        std::fs::create_dir_all(t.path("dir.log")).unwrap();
+        let names = |v: Vec<String>| v.iter().map(|p| file_name(p)).collect::<Vec<_>>();
+        // sorted ignoring the case; kinds are told apart; several patterns separated by ";"
+        assert_eq!(names(list_dir(&t.path(""), "*.log", Kind::Files)), ["a.log", "B.log"]);
+        assert_eq!(names(list_dir(&t.path(""), "*.log", Kind::Dirs)), ["dir.log"]);
+        assert_eq!(names(list_dir(&t.path(""), "*.txt;a*", Kind::Files)), ["a.log", "c.txt"]);
+        assert!(exists(&t.path("*.TXT")) && !exists(&t.path("*.zip")));
+        assert!(exists(&t.path("c.txt")) && !exists(&t.path("nope.txt")) && !exists(""));
+        delete_files(&t.path("*.log"));
+        assert!(!is_file(&t.path("a.log")) && !is_file(&t.path("B.log")) && is_file(&t.path("c.txt")));
+    }
 
     const W: &str = r"C:\Windows";
 

@@ -10,7 +10,7 @@
 //!    typed value produced empty output).
 
 use std::cell::{Cell, RefCell};
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 use std::sync::OnceLock;
 
 use windows_sys::Win32::Foundation::*;
@@ -78,7 +78,7 @@ fn set_cue(h: HWND, text: &str) {
 
 /// `CloseGUI()`: cleans traces and quits.
 fn close_gui() -> ! {
-    clean::clean_all(SCRIPT_FULL.get().map(|s| s.as_str()).unwrap_or(""));
+    clean::clean_all(SCRIPT_FULL.get().map(|s| s.as_str()).unwrap_or(""), None);
     std::process::exit(0)
 }
 
@@ -187,7 +187,6 @@ pub fn run_crypt(script_full: &str) -> ! {
         COMBO.with(|c| c.set(combo));
 
         ShowWindow(hwnd, SW_SHOW);
-        crate::sys::reduce_memory();
         SetFocus(pass);
         let code = ui::run_loop(hwnd);
         std::process::exit(code)
@@ -256,7 +255,6 @@ pub fn run_license(script_full: &str, script_dir: &str) -> ! {
         make_ctrl(hwnd, "STATIC", &license_display(), 0, 0, 8, 8, 515, 290, -1);
         make_ctrl(hwnd, "BUTTON", "Save license", WS_TABSTOP | BS_DEFPUSHBUTTON as u32, 0, 200, 305, 130, 30, ID_SAVE);
         ShowWindow(hwnd, SW_SHOW);
-        crate::sys::reduce_memory();
         let code = ui::run_loop(hwnd);
         std::process::exit(code)
     }
@@ -311,7 +309,7 @@ pub fn run_about(script_full: &str) -> ! {
         make_ctrl(hwnd, "STATIC", "gaP GitHub:", 0, 0, 8, 149, 64, 17, -1);
         let link = make_ctrl(hwnd, "STATIC", "gaP GitHub", SS_NOTIFY as u32, 0, 70, 149, 85, 17, ID_LINK);
         LINK.with(|c| c.set(link));
-        let font = CreateFontW(-11, 0, 0, 0, 700, 0, 1, 0, 1, 0, 0, 0, 0, w("MS Sans Serif").as_ptr());
+        let font = CreateFontW(-ui::scale(11), 0, 0, 0, 700, 0, 1, 0, 1, 0, 0, 0, 0, w("MS Sans Serif").as_ptr());
         SendMessageW(link, WM_SETFONT, font as WPARAM, 1);
         // 80x80 logo from the embedded icon (the original used a BMP).
         let logo = make_ctrl(hwnd, "STATIC", "", SS_ICON as u32, 0, 300, 8, 80, 80, -1);
@@ -319,15 +317,13 @@ pub fn run_about(script_full: &str) -> ! {
         // pick the 48x48 one and enlarge it (blurry). LoadImageW stays as the fallback.
         let mut icon: HICON = null_mut();
         let res_id = std::ptr::without_provenance::<u16>(1);
-        if windows_sys::Win32::UI::Controls::LoadIconWithScaleDown(ui::hinstance(), res_id, 80, 80, &mut icon) < 0 {
-            icon = LoadImageW(ui::hinstance(), res_id, IMAGE_ICON, 80, 80, LR_DEFAULTCOLOR);
+        if windows_sys::Win32::UI::Controls::LoadIconWithScaleDown(ui::hinstance(), res_id, ui::scale(80), ui::scale(80), &mut icon) < 0 {
+            icon = LoadImageW(ui::hinstance(), res_id, IMAGE_ICON, ui::scale(80), ui::scale(80), LR_DEFAULTCOLOR);
         }
         if !icon.is_null() {
             SendMessageW(logo, STM_SETIMAGE, IMAGE_ICON as WPARAM, icon as LPARAM);
         }
         ShowWindow(hwnd, SW_SHOW);
-        crate::sys::reduce_memory();
-        let _ = null::<u16>();
         let code = ui::run_loop(hwnd);
         std::process::exit(code)
     }

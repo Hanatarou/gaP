@@ -9,17 +9,12 @@ use std::time::SystemTime;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::Time::*;
+use windows_sys::Win32::System::Ioctl::FSCTL_SET_COMPRESSION;
 use windows_sys::Win32::System::IO::DeviceIoControl;
 
-use crate::ctx::{Ctx, Prog, Section};
+use crate::ctx::{Ctx, Prog};
 use crate::{sys, util};
-use util::{eq_ic, Enc, Kind};
-
-const NULL: &str = "NULL";
-
-fn is_null(s: &str) -> bool {
-    s == NULL
-}
+use util::{arg, eq_ic, is_null, Enc, Kind};
 
 // ---------------------------------------------------------- protections
 
@@ -41,7 +36,7 @@ fn dangerous_delete(ctx: &Ctx, path: &str) -> bool {
 
 // --------------------------------------------------------------- copy / move
 
-/// Core of `->dir`/`<-dir` with already resolved paths.
+/// Core of `->dir`/`<-dir` with already resolved paths. What fails is written to the debug log.
 pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
     if eq_ic(&norm_cmp(src), &norm_cmp(tgt)) || !util::is_dir(src) {
         return;
@@ -53,34 +48,64 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
     let (s, t) = (std::path::Path::new(src), std::path::Path::new(tgt));
     match (mv, ow) {
         (false, ow) => {
-            let _ = util::copy_dir(s, t, ow);
+            let mut errors = Vec::new();
+            util::copy_dir(s, t, ow, &mut errors);
+            for e in errors {
+                ctx.log_err(&format!("copy \"{}\" to \"{}\"", src, tgt), &e);
+            }
         }
         (true, true) => {
-            if util::exists(tgt) {
-                util::remove_dir_recursive(tgt);
+            if !util::exists(tgt) {
+                if let Err(e) = util::move_dir(src, tgt) {
+                    ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
+                }
+                return;
             }
-            let _ = util::move_dir(src, tgt);
+            // The old target is moved aside, not deleted: if the move fails it is put back, so a failure never
+            // costs the data that was there.
+            let aside = format!("{}.gap_old_{}", tgt, std::process::id());
+            if let Err(e) = std::fs::rename(tgt, &aside) {
+                ctx.log_err(&format!("replace \"{}\" (it cannot be moved aside)", tgt), &e);
+                return;
+            }
+            match util::move_dir(src, tgt) {
+                Ok(()) => {
+                    util::remove_dir_recursive(&aside);
+                }
+                Err(e) => {
+                    ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
+                    util::remove_dir_recursive(tgt); // what was copied before the failure
+                    if let Err(e) = std::fs::rename(&aside, tgt) {
+                        ctx.log_err(&format!("put \"{}\" back (it stays in \"{}\")", tgt, aside), &e);
+                    }
+                }
+            }
         }
         (true, false) => {
             if !util::exists(tgt) {
-                let _ = util::move_dir(src, tgt);
+                if let Err(e) = util::move_dir(src, tgt) {
+                    ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
+                }
             }
         }
     }
 }
 
 /// Core of `->file`/`<-file` with resolved FILE paths.
-pub fn transfer_file(src: &str, tgt: &str, mv: bool, ow: bool) {
+pub fn transfer_file(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
     if eq_ic(src, tgt) || !util::is_file(src) {
         return;
     }
-    let _ = if mv { util::move_file(src, tgt, ow) } else { util::copy_file(src, tgt, ow) };
+    let r = if mv { util::move_file(src, tgt, ow) } else { util::copy_file(src, tgt, ow) };
+    if let Err(e) = r {
+        ctx.log_err(&format!("{} \"{}\" to \"{}\"", if mv { "move" } else { "copy" }, src, tgt), &e);
+    }
 }
 
 pub fn run_prog_fs(ctx: &Ctx, p: &Prog) {
     match p {
         Prog::LtrDir { src, tgt, mv, ow } => transfer_dir(ctx, src, tgt, *mv, *ow),
-        Prog::LtrFile { src, tgt, mv, ow } => transfer_file(src, tgt, *mv, *ow),
+        Prog::LtrFile { src, tgt, mv, ow } => transfer_file(ctx, src, tgt, *mv, *ow),
         _ => {}
     }
 }
@@ -90,10 +115,6 @@ fn parse_transfer_flags(flag: &str) -> (bool, bool) {
     let mv = util::contains_ic(f, "move");
     let ow = !util::contains_ic(f, "no overwrite");
     (mv, ow)
-}
-
-fn arg(a: &[String], i: usize) -> &str {
-    a.get(i).map(|s| s.as_str()).unwrap_or(NULL)
 }
 
 /// Full path of an argument as gaP has to open it so that it means what it means to the
@@ -154,7 +175,7 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let flag = ctx.expand(arg(args, 2));
     let (mv, ow) = parse_transfer_flags(&flag);
     let tgt = resolve_file_target(ctx, &src, &tgt);
-    transfer_file(&src, &tgt, mv, ow);
+    transfer_file(ctx, &src, &tgt, mv, ow);
 }
 
 /// `dir = Source [:: Destination]` (BEFORE only).
@@ -179,8 +200,8 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
         resolve_file_target(ctx, &src, &t)
     };
     let backup = format!("{}_backup", src);
-    transfer_file(&src, &backup, true, true);
-    transfer_file(&settings, &src, false, true);
+    transfer_file(ctx, &src, &backup, true, true);
+    transfer_file(ctx, &settings, &src, false, true);
     ctx.after_prog.push(Prog::LtrFile { src: src.clone(), tgt: settings, mv: true, ow: true });
     ctx.after_prog.push(Prog::LtrFile { src: backup, tgt: src, mv: true, ow: true });
 }
@@ -197,7 +218,7 @@ pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = full(ctx, arg(args, 0));
     let backup = format!("{}_backup", src);
-    transfer_file(&src, &backup, true, true);
+    transfer_file(ctx, &src, &backup, true, true);
     ctx.after_prog.push(Prog::LtrFile { src: backup, tgt: src, mv: true, ow: true });
 }
 
@@ -205,8 +226,9 @@ pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
 
 pub fn plus_dir(ctx: &mut Ctx, args: &[String]) {
     let d = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
-    if !util::exists(&d) {
-        let _ = std::fs::create_dir_all(&d);
+    // creating a folder that exists is not an error
+    if let Err(e) = std::fs::create_dir_all(&d) {
+        ctx.log_err(&format!("create folder \"{}\"", d), &e);
     }
 }
 
@@ -228,16 +250,15 @@ pub fn plus_file(ctx: &mut Ctx, args: &[String]) {
             let _ = std::fs::remove_file(&f); // recreates (mode "erase")
         }
         let enc = if util::ansi_to_string(&util::string_to_ansi(&text)) == text { Enc::Ansi } else { Enc::Utf8 };
-        let _ = util::write_text(&f, &text, enc);
+        if let Err(e) = util::write_text(&f, &text, enc) {
+            ctx.log_err(&format!("create file \"{}\"", f), &e);
+        }
     }
 }
 
 pub fn minus_dir(ctx: &mut Ctx, args: &[String]) {
     let d = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let flag = ctx.expand(arg(args, 1));
-    if !util::exists(&d) {
-        return;
-    }
     let (par, name) = util::split_parent(&d);
     let par = if par.len() == 2 { format!("{}\\", par) } else { par };
     for m in util::list_dir(&par, &name, Kind::Dirs) {
@@ -247,17 +268,15 @@ pub fn minus_dir(ctx: &mut Ctx, args: &[String]) {
         }
         if eq_ic(&flag, "ifempty") {
             util::remove_dir_if_empty(&m);
-        } else {
-            util::remove_dir_recursive(&m);
+        } else if !util::remove_dir_recursive(&m) {
+            ctx.log(&format!("ERROR delete folder \"{}\"", m));
         }
     }
 }
 
 pub fn minus_file(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
-    if util::exists(&f) {
-        util::delete_files(&f);
-    }
+    util::delete_files(&f);
 }
 
 // --------------------------------------------------------------- attributes
@@ -310,7 +329,7 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
             let state: u16 = if compress { 1 } else { 0 };
             let mut ret = 0u32;
             DeviceIoControl(
-                h, 0x0009_C040, &state as *const u16 as *const _, 2, null_mut(), 0, &mut ret, null_mut(),
+                h, FSCTL_SET_COMPRESSION, &state as *const u16 as *const _, 2, null_mut(), 0, &mut ret, null_mut(),
             );
             CloseHandle(h);
         }
@@ -349,13 +368,17 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
     let mut c = std::process::Command::new(cmd);
     c.current_dir(&wd);
     if eq_ic(&show, "hide") {
-        c.raw_arg(format!("/C \"{}\"", logical)).creation_flags(0x0800_0000);
+        // The path goes between doubled quotes, as in the original: cmd.exe drops the outer pair and keeps the
+        // inner one, which is what a path with "&" or "(x86)" needs.
+        c.raw_arg(format!("/C \"\"{}\"\"", logical)).creation_flags(0x0800_0000);
     } else if eq_ic(&show, "show") {
-        c.raw_arg(format!("/K \"{}\"", logical));
+        c.raw_arg(format!("/K \"\"{}\"\"", logical));
     } else {
         return;
     }
-    let _ = c.status();
+    if let Err(e) = c.status() {
+        ctx.log_err(&format!("run batch \"{}\"", logical), &e);
+    }
 }
 
 // -------------------------------------------------------------------- dates
@@ -402,7 +425,7 @@ fn parse_stamp(digits: &str) -> Option<SYSTEMTIME> {
 pub fn date(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
     let raw = ctx.expand(arg(args, 1));
-    let mut d: String = raw.chars().filter(|c| !matches!(c, '.' | '/' | ' ' | ':')).collect();
+    let mut d: String = raw.chars().filter(|c| !matches!(c, '.' | '/' | ' ' | ':' | '-')).collect();
     if is_null(&d) || eq_ic(&d, "now") || d.is_empty() {
         d = local_stamp(SystemTime::now());
     }
@@ -517,7 +540,9 @@ pub fn replace(ctx: &mut Ctx, args: &[String]) {
     if let Some((text, enc)) = util::read_text(&f) {
         let new = util::replace_all_ic(&text, &find, &rep);
         if new != text {
-            let _ = util::write_text(&f, &new, enc);
+            if let Err(e) = util::write_text(&f, &new, enc) {
+                ctx.log_err(&format!("write \"{}\"", f), &e);
+            }
         }
     }
 }
@@ -534,7 +559,9 @@ pub fn replaceline(ctx: &mut Ctx, args: &[String]) {
         if let Some(i) = lines.iter().position(|(l, _)| util::contains_ic(l, &find)) {
             lines[i].0 = rep;
             let out: String = lines.iter().map(|(l, e)| format!("{}{}", l, e)).collect();
-            let _ = util::write_text(&f, &out, enc);
+            if let Err(e) = util::write_text(&f, &out, enc) {
+                ctx.log_err(&format!("write \"{}\"", f), &e);
+            }
         }
     }
 }
@@ -563,8 +590,7 @@ pub fn regmerge(ctx: &mut Ctx, args: &[String]) {
         out.push_str(&l);
         out.push_str(if e.is_empty() { "\r\n" } else { &e });
     }
-    let _ = util::write_text(&f1, &out, e1);
+    if let Err(e) = util::write_text(&f1, &out, e1) {
+        ctx.log_err(&format!("write \"{}\"", f1), &e);
+    }
 }
-
-#[allow(dead_code)]
-pub fn section_unused(_s: Section) {}

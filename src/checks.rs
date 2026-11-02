@@ -5,50 +5,62 @@
 use std::path::Path;
 
 use crate::clean;
-use crate::ctx::{exit_now, Ctx};
+use crate::ctx::{
+    exit_code, exit_now, Ctx, EXIT_CANCELLED, EXIT_CONFIG, EXIT_REQUIREMENT, EXIT_RUNNING,
+};
 use crate::reg::{self, View};
-use crate::{crypto, ini, sys, ui, util};
+use crate::{crypto, ipc, sys, ui, util};
 use util::{auto_num, eq_ic};
 
 /// IniRead(GENERAL, key, default) with the macros already expanded.
 fn general(ctx: &mut Ctx, key: &str, default: &str) -> String {
-    let raw = ini::read(&ctx.ini_path.clone(), "GENERAL", key, default);
+    let raw = ctx.ini.get(Some("GENERAL"), key).unwrap_or_else(|| default.to_string());
     ctx.expand(&raw)
 }
 
-fn quit_clean(ctx: &Ctx) -> ! {
-    clean::clean_all(&ctx.script_full);
-    exit_now()
+fn quit_clean(ctx: &Ctx, code: i32) -> ! {
+    clean::clean_all(&ctx.script_full, ctx.main_app.as_deref());
+    exit_code(code)
 }
 
 // ---------------------------------------------------------------------- read-only
 
 pub fn read_only_init(ctx: &mut Ctx) {
-    let probe = format!("{}\\@#$readonly@#$", ctx.script_dir.trim_end_matches('\\'));
-    let opened = std::fs::OpenOptions::new().create(true).append(true).open(&probe);
-    match opened {
-        Ok(f) => {
-            drop(f);
-            let _ = std::fs::remove_file(&probe);
-            ctx.is_readonly = false;
-        }
-        Err(_) => {
-            ctx.is_readonly = true;
-            let v = auto_num(&general(ctx, "!readonly", "1"));
-            let exe = format!("{}.exe", ctx.exe_name);
-            let text = format!(
-                "\"{0}\" is running from a read only drive. Some applications may not work as expected in this mode. \"{0}\" will not be able to update configuration changes in files stored in a read only drive.",
-                exe
-            );
-            match v {
-                -2 => quit_clean(ctx),
-                -1 => {
-                    ctx.msg(&text);
-                    quit_clean(ctx);
-                }
-                1 => ctx.msg(&text),
-                _ => {}
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, GENERIC_WRITE};
+    use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_FLAG_DELETE_ON_CLOSE};
+
+    // The drive is writable if a new file can be created in it. The file has a name of its own and the system
+    // deletes it when the handle closes, so nothing is left behind (not even after a crash).
+    let probe = format!("{}\\@#$readonly@#${}", ctx.script_dir.trim_end_matches('\\'), std::process::id());
+    let opened = std::fs::OpenOptions::new()
+        .access_mode(GENERIC_WRITE | DELETE)
+        .create_new(true)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+        .open(&probe);
+    let writable = match &opened {
+        Ok(_) => true,
+        // a file with this name was already there: the folder accepts new files
+        Err(e) => matches!(e.raw_os_error(), Some(c) if c as u32 == ERROR_FILE_EXISTS || c as u32 == ERROR_ALREADY_EXISTS),
+    };
+    drop(opened);
+    ctx.is_readonly = !writable;
+    if !writable {
+        let v = auto_num(&general(ctx, "!readonly", "1"));
+        let exe = format!("{}.exe", ctx.exe_name);
+        let text = format!(
+            "\"{0}\" is running from a read only drive. Some applications may not work as expected in this mode. \"{0}\" will not be able to update configuration changes in files stored in a read only drive.",
+            exe
+        );
+        match v {
+            -2 => quit_clean(ctx, EXIT_REQUIREMENT),
+            -1 => {
+                ctx.msg(&text);
+                quit_clean(ctx, EXIT_REQUIREMENT);
             }
+            1 => ctx.msg(&text),
+            _ => {}
         }
     }
 }
@@ -130,15 +142,16 @@ pub fn java_info(views: &[View]) -> JavaInfo {
                     add(java_major(&s), &mut majors);
                 }
             }
-            for sub in reg::enum_subkeys(root, *v) {
-                add(java_major(&sub), &mut majors);
+            let subs = reg::enum_subkeys(root, *v);
+            for sub in &subs {
+                add(java_major(sub), &mut majors);
             }
             if exe.is_none() {
                 let mut cands: Vec<String> = Vec::new();
                 if let Some(c) = &cur {
                     cands.push(c.clone());
                 }
-                cands.extend(reg::enum_subkeys(root, *v));
+                cands.extend(subs);
                 for c in cands {
                     if let Some(h) = reg::read_string(&format!("{}\\{}", root, c), "JavaHome", *v) {
                         if let Some(e) = try_exe(&h) {
@@ -158,11 +171,10 @@ pub fn java_info(views: &[View]) -> JavaInfo {
     JavaInfo { majors, exe }
 }
 
-pub fn java_early(ctx: &mut Ctx) {
-    // Runs before the main application is chosen (`{JAVAEXE}` can be used in `application`).
-    let info = java_info(&all_views());
-    let exe = info.exe.unwrap_or_else(|| "There is no Java Runtime Environment installed.".to_string());
-    ctx.add_var("JAVAEXE", &exe);
+/// Value of `{JAVAEXE}`. It is looked for in the registry only when the macro is used, wherever it is (it can be
+/// part of `application`).
+pub fn java_exe_text() -> String {
+    java_info(&all_views()).exe.unwrap_or_else(|| "There is no Java Runtime Environment installed.".to_string())
 }
 
 pub fn java_full(ctx: &mut Ctx) {
@@ -177,7 +189,7 @@ pub fn java_full(ctx: &mut Ctx) {
     if !ok {
         ctx.msg(&format!("The main application requires Java Runtime Environment version {} to run.", req));
         if exit {
-            exit_now();
+            exit_code(EXIT_REQUIREMENT);
         }
     }
 }
@@ -225,14 +237,14 @@ fn choose_segment(os_arch: &str, segments: usize, exists: impl Fn(usize) -> bool
 
 pub fn main_app_init(ctx: &mut Ctx) {
     let app = general(ctx, "application", "");
-    if app.is_empty() || app == "NULL" {
+    if app.is_empty() || util::is_null(&app) {
         ctx.msg("You MUST define a main application path in the \"GENERAL\" section.");
-        exit_now();
+        exit_code(EXIT_CONFIG);
     }
     let segs = util::split_args(&app);
     if segs.len() > 3 {
         ctx.msg("Check the main application path input data.");
-        exit_now();
+        exit_code(EXIT_CONFIG);
     }
     ctx.show_state = 5; // SW_SHOW
     if segs.len() == 3 {
@@ -254,11 +266,11 @@ pub fn main_app_init(ctx: &mut Ctx) {
         AppChoice::Chosen(i) => i,
         AppChoice::NoX86 => {
             ctx.msg("The main application (x86) path is invalid.");
-            exit_now();
+            exit_code(EXIT_CONFIG);
         }
         AppChoice::NoneValid => {
             ctx.msg("The main application (x86) path and (x64) path are invalid.");
-            exit_now();
+            exit_code(EXIT_CONFIG);
         }
     };
     let chosen = pick(ctx, &segs[index]);
@@ -267,7 +279,6 @@ pub fn main_app_init(ctx: &mut Ctx) {
     ctx.app_arch = app_arch;
     ctx.add_var("APPEXE", &chosen);
     ctx.add_var("EXEPATH", &exepath);
-    clean::set_main_app(&chosen);
     ctx.main_app = Some(chosen);
 }
 
@@ -285,7 +296,7 @@ pub fn workdir_init(ctx: &mut Ctx) {
         let full = util::path_full(&wd, &ctx.script_dir);
         if !util::exists(&full) {
             ctx.msg("The main application working directory path is invalid.");
-            exit_now();
+            exit_code(EXIT_CONFIG);
         }
         full
     };
@@ -295,37 +306,23 @@ pub fn workdir_init(ctx: &mut Ctx) {
 
 // ---------------------------------------------------------- single instance
 
-pub fn gapnew_paths(ctx: &Ctx, pid: u32) -> (String, String) {
-    let local = format!("{}\\@#$gapnew@#$", ctx.script_dir.trim_end_matches('\\'));
-    let dir = format!("{}{}_{}_{}", ctx.common_appdata, ctx.exe_name, pid, ctx.file_hash);
-    (local, format!("{}\\@#$gapnew@#$", dir))
-}
-
-fn send_new_cmdline(ctx: &Ctx, owner_pid: u32) {
-    let (local, shared) = gapnew_paths(ctx, owner_pid);
-    let target = if ctx.is_readonly { shared } else { local };
-    if let Some(par) = Path::new(&target).parent() {
-        let _ = std::fs::create_dir_all(par);
-    }
-    let tmp = format!("{}.tmp", target);
-    if std::fs::write(&tmp, ctx.cmd_raw.as_bytes()).is_ok() {
-        let _ = std::fs::remove_file(&target);
-        let _ = std::fs::rename(&tmp, &target);
-    }
-}
-
+/// The first instance of this executable owns a named mutex and listens on a named pipe; the other instances
+/// find the mutex taken and, depending on `!multiple`, pass their command line through the pipe and leave.
 pub fn multiple_init(ctx: &mut Ctx) {
     let multiple = auto_num(&general(ctx, "!multiple", "0"));
-    let code = format!("@{}@{}@", crypto::sha1_hex(&util::string_to_ansi(&ctx.script_full)), ctx.file_hash);
-    let owner = sys::singleton_pid(&code);
-    if owner == 0 {
+    // The names depend on where the executable is and on what it contains.
+    let code = format!("@{}@{}@", crypto::sha1_hex(&util::string_to_ansi(&ctx.script_full)), ctx.file_hash());
+    let key = crypto::sha1_hex(code.as_bytes());
+    let pipe = ipc::pipe_name(&key);
+    if let sys::Singleton::First = sys::acquire_singleton(&format!("gaP_{}", key)) {
+        ctx.ipc = ipc::Server::start(&pipe);
         return;
     }
     ctx.first_instance = false;
     match multiple {
-        -1 => exit_now(),
+        -1 => exit_code(EXIT_RUNNING),
         1 => {
-            send_new_cmdline(ctx, owner);
+            ipc::send(&pipe, &ctx.cmd_raw);
             exit_now();
         }
         0 => {
@@ -334,9 +331,10 @@ pub fn multiple_init(ctx: &mut Ctx) {
                 ctx.exe_name
             );
             if ui::ok_cancel(&ctx.title, &q) {
-                send_new_cmdline(ctx, owner);
+                ipc::send(&pipe, &ctx.cmd_raw);
+                exit_now();
             }
-            exit_now();
+            exit_code(EXIT_CANCELLED);
         }
         _ => {}
     }
@@ -359,11 +357,11 @@ pub fn debug_log_init(ctx: &mut Ctx) {
         let _ = std::fs::create_dir_all(&d);
         format!("{}\\{}_{}.log", d, ctx.exe_name, stamp)
     } else {
-        let d = format!("{}gaPLogs", ctx.common_appdata);
+        let d = format!("{}gaPLogs", ctx.common_appdata());
         let _ = std::fs::create_dir_all(&d);
         format!("{}\\{}_{}_{}.log", d, ctx.exe_name, std::process::id(), stamp)
     };
-    let lg = crate::ctx::Logger { path };
+    let Some(lg) = crate::ctx::Logger::open(&path) else { return };
     let pad = |s: String| format!("{:<57}#", s);
     lg.write("######################gaP Log Header######################");
     lg.write(&pad(format!(
@@ -376,7 +374,7 @@ pub fn debug_log_init(ctx: &mut Ctx) {
     lg.write("######################gaP Log Header######################");
     lg.write("");
     lg.write("[Shell Folders]");
-    for (n, v) in &ctx.shell {
+    for (n, v) in ctx.shell_all() {
         lg.write(&format!("{}|{}", n, v));
     }
     lg.write("");
@@ -392,7 +390,7 @@ pub fn admin_init(ctx: &mut Ctx) {
     }
     let exe = format!("\"{}.exe\"", ctx.exe_name);
     match auto_num(&v) {
-        -1 => exit_now(),
+        -1 => exit_code(EXIT_REQUIREMENT),
         1 => {
             // Windows default: missing EnableLUA = UAC on.
             let lua = reg::read_dword(
@@ -400,22 +398,26 @@ pub fn admin_init(ctx: &mut Ctx) {
                 "EnableLUA",
                 View::Native,
             );
-            if sys::os_version().0 >= 6 && lua == Some(0) {
+            if lua == Some(0) {
                 ctx.msg(&format!(
                     "{exe} could not be launched with administrator privileges. The main cause is explained below. Please, check it and try again.\r\n\r\nSystem administrator disabled UAC (User Account Control) for all users. When this is done UAC dialogs will not be triggered and standard users will not be able to launch {exe} with administrator privileges."
                 ));
-                exit_now();
+                exit_code(EXIT_REQUIREMENT);
             }
+            // the elevated copy has to find itself the first instance
+            sys::release_singleton();
             if !sys::relaunch_elevated(&ctx.script_full, &ctx.cmd_raw, &ctx.script_dir) {
                 ctx.msg(&format!(
                     "{exe} could not be launched with administrator privileges. Some possible causes are listed below. Please, check them and try again.\r\n\r\n- User cancelled the \"Run As\" dialog;\r\n- User cancelled the UAC (User Account Control) dialog;\r\n- User filled the \"User name\" or \"Password\" fields with wrong data; and\r\n- System administrator disabled UAC for all users. When this is done UAC dialogs will not be triggered and standard users will not be able to launch {exe} with administrator privileges."
                 ));
+                exit_code(EXIT_REQUIREMENT);
             }
+            // the elevated copy took over
             exit_now();
         }
         2 => {
             ctx.msg("The main application requires administrator privileges to run.");
-            exit_now();
+            exit_code(EXIT_REQUIREMENT);
         }
         _ => {}
     }
@@ -478,7 +480,7 @@ pub fn dotnet_init(ctx: &mut Ctx) {
     if !ok {
         ctx.msg(&format!("The main application requires .NET Framework version {} to run.", req));
         if exit {
-            exit_now();
+            exit_code(EXIT_REQUIREMENT);
         }
     }
 }
@@ -486,15 +488,26 @@ pub fn dotnet_init(ctx: &mut Ctx) {
 // ------------------------------------------------------------------- Internet
 
 pub fn is_online() -> bool {
-    let local = sys::ping("127.0.0.1", 4000);
-    if !local {
+    if !sys::ping("127.0.0.1", 4000) {
         return false;
     }
-    if sys::ping("www.google.com", 4000) || sys::ping("www.microsoft.com", 4000) {
-        return true;
+    // The probes (ICMP, and TCP for networks that block it) run side by side: the answer is "online" as soon as one
+    // works and "offline" when the slowest has failed, about 4 seconds instead of the sum of all of them.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let probes: [fn() -> bool; 4] = [
+        || sys::ping("www.google.com", 4000),
+        || sys::ping("www.microsoft.com", 4000),
+        || sys::tcp_reachable("www.microsoft.com", 443, 4000),
+        || sys::tcp_reachable("www.google.com", 443, 4000),
+    ];
+    for probe in probes {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(probe());
+        });
     }
-    // Networks that block ICMP: try a plain TCP connection.
-    sys::tcp_reachable("www.microsoft.com", 443, 4000) || sys::tcp_reachable("www.google.com", 443, 4000)
+    drop(tx);
+    rx.iter().any(|ok| ok)
 }
 
 pub fn online_init(ctx: &mut Ctx) {
@@ -508,24 +521,24 @@ pub fn online_init(ctx: &mut Ctx) {
     match (online, mode) {
         (false, 1) => {
             if !ui::ok_cancel(&t, "The main application requires an active Internet connection to run. Continue anyway?") {
-                exit_now();
+                exit_code(EXIT_CANCELLED);
             }
         }
         (false, 2) => {
             ctx.msg("The main application requires an active Internet connection to run.");
-            exit_now();
+            exit_code(EXIT_REQUIREMENT);
         }
-        (false, -1) => exit_now(),
+        (false, -1) => exit_code(EXIT_REQUIREMENT),
         (true, -2) => {
             if !ui::ok_cancel(&t, "The main application requires an inactive Internet connection to run. Continue anyway?") {
-                exit_now();
+                exit_code(EXIT_CANCELLED);
             }
         }
         (true, -3) => {
             ctx.msg("The main application requires an inactive Internet connection to run.");
-            exit_now();
+            exit_code(EXIT_REQUIREMENT);
         }
-        (true, -4) => exit_now(),
+        (true, -4) => exit_code(EXIT_REQUIREMENT),
         _ => {}
     }
 }
@@ -579,11 +592,11 @@ pub fn os_init(ctx: &mut Ctx) {
     .to_string();
     if !older && cur < thr {
         ctx.msg(&format!("The main application requires a host Operating System equal Windows {} or newer.", pretty));
-        exit_now();
+        exit_code(EXIT_REQUIREMENT);
     }
     if older && cur > thr {
         ctx.msg(&format!("The main application requires a host Operating System equal Windows {} or older.", pretty));
-        exit_now();
+        exit_code(EXIT_REQUIREMENT);
     }
 }
 

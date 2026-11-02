@@ -2,18 +2,18 @@
 //! single instance, windows, ping, language and shell folders.
 
 use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::NetworkManagement::IpHelper::*;
 use windows_sys::Win32::Security::*;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
-use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
 use windows_sys::Win32::System::SystemInformation::*;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::Environment::GetCommandLineW;
 
 use crate::util::{self, from_w, w};
@@ -62,12 +62,6 @@ pub fn os_version() -> (u32, u32, u32) {
 pub fn os_name() -> String {
     let (ma, mi, b) = os_version();
     let n = match (ma, mi) {
-        (5, 1) => "Windows XP".to_string(),
-        (5, 2) => "Windows XP x64/2003".to_string(),
-        (6, 0) => "Windows Vista".to_string(),
-        (6, 1) => "Windows 7".to_string(),
-        (6, 2) => "Windows 8".to_string(),
-        (6, 3) => "Windows 8.1".to_string(),
         (10, 0) if b >= 22000 => "Windows 11".to_string(),
         (10, 0) => "Windows 10".to_string(),
         _ => format!("Windows {}.{}", ma, mi),
@@ -103,12 +97,6 @@ pub fn relaunch_elevated(exe: &str, params: &str, dir: &str) -> bool {
     }
 }
 
-pub fn reduce_memory() {
-    unsafe {
-        K32EmptyWorkingSet(GetCurrentProcess());
-    }
-}
-
 /// Raw command line after the program name (`$CmdLineRaw`).
 pub fn cmdline_raw() -> String {
     unsafe {
@@ -140,9 +128,7 @@ pub fn cmdline_raw() -> String {
 // ---------------------------------------------------------------- processes
 
 pub struct ProcInfo {
-    #[allow(dead_code)]
     pub pid: u32,
-    pub parent: u32,
     pub name: String,
 }
 
@@ -157,7 +143,7 @@ pub fn list_processes() -> Vec<ProcInfo> {
         pe.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         if Process32FirstW(snap, &mut pe) != 0 {
             loop {
-                out.push(ProcInfo { pid: pe.th32ProcessID, parent: pe.th32ParentProcessID, name: from_w(&pe.szExeFile) });
+                out.push(ProcInfo { pid: pe.th32ProcessID, name: from_w(&pe.szExeFile) });
                 if Process32NextW(snap, &mut pe) == 0 {
                     break;
                 }
@@ -168,46 +154,41 @@ pub fn list_processes() -> Vec<ProcInfo> {
     out
 }
 
-fn ft_to_u64(ft: FILETIME) -> u64 {
-    ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64
-}
+/// Handles of the processes gaP started and does not wait for on the spot (the main application and the `run`
+/// items without `wait`), as `usize` so the list can be a static.
+static CHILDREN: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
-unsafe fn creation_time(h: HANDLE) -> u64 {
-    let (mut c, mut e, mut k, mut u): (FILETIME, FILETIME, FILETIME, FILETIME) = std::mem::zeroed();
-    if GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0 {
-        ft_to_u64(c)
-    } else {
-        0
-    }
-}
-
-/// Live child processes of the current process (`_WinAPI_EnumChildProcess`).
-/// Ignores reused PIDs (children "created before" us) and already terminated ones.
-pub fn live_children() -> Vec<u32> {
-    let me = unsafe { GetCurrentProcessId() };
-    let my_start = unsafe { creation_time(GetCurrentProcess()) };
-    let mut v = Vec::new();
-    for p in list_processes() {
-        if p.parent != me || p.pid == me {
-            continue;
+/// The processes that gaP started and that are still running. The handles of the ones that already ended are
+/// closed and dropped.
+pub fn running_children() -> Vec<HANDLE> {
+    let mut list = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    list.retain(|&h| unsafe {
+        if WaitForSingleObject(h as HANDLE, 0) == WAIT_TIMEOUT {
+            true
+        } else {
+            CloseHandle(h as HANDLE);
+            false
         }
+    });
+    list.iter().map(|&h| h as HANDLE).collect()
+}
+
+/// Timeout of "no limit" for `wait_any`.
+pub const FOREVER: u32 = INFINITE;
+
+/// Most handles one wait can take.
+const MAX_WAIT: usize = 64;
+
+/// Sleeps until one of `children` ends, `extra` is signaled or `timeout_ms` passes. With more handles than a
+/// single wait takes, the first ones are waited for and the caller should use a timeout.
+pub fn wait_any(children: &[HANDLE], extra: Option<HANDLE>, timeout_ms: u32) {
+    let mut list: Vec<HANDLE> = children.iter().copied().take(MAX_WAIT - 1).collect();
+    list.extend(extra);
+    if !list.is_empty() {
         unsafe {
-            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, p.pid);
-            if h.is_null() {
-                // no access: assumes alive if listed
-                v.push(p.pid);
-                continue;
-            }
-            let mut code = 0u32;
-            let alive = GetExitCodeProcess(h, &mut code) != 0 && code == STILL_ACTIVE as u32;
-            let start = creation_time(h);
-            CloseHandle(h);
-            if alive && start >= my_start {
-                v.push(p.pid);
-            }
+            WaitForMultipleObjects(list.len() as u32, list.as_ptr(), 0, timeout_ms);
         }
     }
-    v
 }
 
 /// ProcessClose by name prefix (case-insensitive; optional trailing `*`).
@@ -232,13 +213,9 @@ pub fn kill_by_prefix(pattern: &str) -> usize {
     n
 }
 
-pub struct Launched {
-    #[allow(dead_code)]
-    pub pid: u32,
-}
-
-/// Run/RunWait. `cmdline` already contains the quoted executable and the arguments.
-pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<Launched, u32> {
+/// Run/RunWait. `cmdline` already contains the quoted executable and the arguments. A process that is not waited
+/// for is remembered (see `running_children`).
+pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<(), u32> {
     unsafe {
         let mut si: STARTUPINFOW = std::mem::zeroed();
         si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
@@ -254,12 +231,14 @@ pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<Launche
         if ok == 0 {
             return Err(GetLastError());
         }
+        CloseHandle(pi.hThread);
         if wait {
             WaitForSingleObject(pi.hProcess, INFINITE);
+            CloseHandle(pi.hProcess);
+        } else {
+            CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).push(pi.hProcess as usize);
         }
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        Ok(Launched { pid: pi.dwProcessId })
+        Ok(())
     }
 }
 
@@ -353,30 +332,44 @@ pub fn window_title_exists(part: &str) -> bool {
 
 // ---------------------------------------------------------- single instance
 
-unsafe extern "system" fn singleton_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    DefWindowProcW(h, m, wp, lp)
+/// The mutex of this process (0 = none), kept open until the process ends or `release_singleton`.
+static SINGLETON: AtomicUsize = AtomicUsize::new(0);
+
+pub enum Singleton {
+    /// This is the first instance: it owns the mutex until the process ends.
+    First,
+    /// Another instance of the same executable already runs in this session.
+    Existing,
 }
 
-/// `_SingletonPID`: returns 0 if we are the first instance (and registers the
-/// hidden marker window) or the PID of the existing instance.
-pub fn singleton_pid(code: &str) -> u32 {
+/// Creates the named mutex that tells the instances of an executable apart. `Local\` keeps it per session.
+pub fn acquire_singleton(name: &str) -> Singleton {
     unsafe {
-        let title = w(code);
-        let existing = FindWindowExW(HWND_MESSAGE, null_mut(), null(), title.as_ptr());
-        if !existing.is_null() {
-            let mut pid = 0u32;
-            GetWindowThreadProcessId(existing, &mut pid);
-            return pid;
+        let h = CreateMutexW(null(), 0, w(&format!("Local\\{}", name)).as_ptr());
+        let err = GetLastError();
+        if h.is_null() {
+            // The mutex exists and belongs to a process with more rights (an elevated copy of the program):
+            // opening it is denied, and that also means another instance runs.
+            return if err == ERROR_ACCESS_DENIED { Singleton::Existing } else { Singleton::First };
         }
-        let hi = crate::ui::hinstance();
-        let cls = w("gaPSingletonMarker");
-        let mut wc: WNDCLASSW = std::mem::zeroed();
-        wc.lpfnWndProc = Some(singleton_proc);
-        wc.hInstance = hi;
-        wc.lpszClassName = cls.as_ptr();
-        RegisterClassW(&wc);
-        CreateWindowExW(0, cls.as_ptr(), title.as_ptr(), 0, 0, 0, 0, 0, HWND_MESSAGE, null_mut(), hi, null());
-        0
+        if err == ERROR_ALREADY_EXISTS {
+            CloseHandle(h);
+            Singleton::Existing
+        } else {
+            // The handle is kept open on purpose: the system releases it when the process ends.
+            SINGLETON.store(h as usize, Ordering::SeqCst);
+            Singleton::First
+        }
+    }
+}
+
+/// Lets go of the mutex before this process starts its elevated copy, which must find itself the first instance.
+pub fn release_singleton() {
+    let h = SINGLETON.swap(0, Ordering::SeqCst);
+    if h != 0 {
+        unsafe {
+            CloseHandle(h as HANDLE);
+        }
     }
 }
 
@@ -431,6 +424,31 @@ pub fn tcp_reachable(host: &str, port: u16, timeout_ms: u64) -> bool {
 /// `@OSLang` in decimal (e.g., 1046 = pt-BR, 2057 = en-GB).
 pub fn os_lang() -> u32 {
     unsafe { windows_sys::Win32::Globalization::GetSystemDefaultUILanguage() as u32 }
+}
+
+/// The language of the system as the system names it: (locale name "pt-BR", English name of the language
+/// "Portuguese", English name of the country "Brazil").
+pub fn locale() -> Option<(String, String, String)> {
+    use windows_sys::Win32::Globalization::{
+        GetLocaleInfoEx, LCIDToLocaleName, LOCALE_SENGLISHCOUNTRYNAME, LOCALE_SENGLISHLANGUAGENAME,
+    };
+    // LOCALE_NAME_MAX_LENGTH
+    const NAME_MAX: usize = 85;
+    unsafe {
+        let mut name = [0u16; NAME_MAX];
+        if LCIDToLocaleName(os_lang(), name.as_mut_ptr(), name.len() as i32, 0) <= 0 {
+            return None;
+        }
+        let info = |kind: u32| -> String {
+            let mut buf = [0u16; 128];
+            if GetLocaleInfoEx(name.as_ptr(), kind, buf.as_mut_ptr(), buf.len() as i32) > 0 {
+                from_w(&buf)
+            } else {
+                String::new()
+            }
+        };
+        Some((from_w(&name), info(LOCALE_SENGLISHLANGUAGENAME), info(LOCALE_SENGLISHCOUNTRYNAME)))
+    }
 }
 
 // ------------------------------------------------------------- shell folders

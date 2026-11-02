@@ -45,24 +45,22 @@ pub fn ok_cancel_topmost(title: &str, text: &str) -> bool {
     msgbox_raw(title, text, MB_OKCANCEL | MB_ICONINFORMATION | MB_TOPMOST) == IDOK
 }
 
-#[allow(dead_code)]
-pub fn warn(title: &str, text: &str) {
-    msgbox_raw(title, text, MB_OK | MB_ICONWARNING);
-}
-
 // --------------------------------------------------------------- Clipboard
+
+/// Opens the clipboard, trying again for a moment: another program may be using it.
+fn open_clipboard() -> bool {
+    for _ in 0..10 {
+        if unsafe { OpenClipboard(null_mut()) } != 0 {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    false
+}
 
 pub fn clip_put(text: &str) -> bool {
     unsafe {
-        let mut opened = false;
-        for _ in 0..10 {
-            if OpenClipboard(null_mut()) != 0 {
-                opened = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        if !opened {
+        if !open_clipboard() {
             return false;
         }
         EmptyClipboard();
@@ -93,7 +91,7 @@ pub fn clip_put(text: &str) -> bool {
 
 pub fn clip_get() -> String {
     unsafe {
-        if OpenClipboard(null_mut()) == 0 {
+        if !open_clipboard() {
             return String::new();
         }
         let mut out = String::new();
@@ -120,8 +118,39 @@ pub unsafe fn hinstance() -> HINSTANCE {
     GetModuleHandleW(null()) as HINSTANCE
 }
 
+/// DPI of the system (the manifest makes the program aware of it, so windows are not stretched).
+pub fn dpi() -> i32 {
+    use std::sync::OnceLock;
+    static DPI: OnceLock<i32> = OnceLock::new();
+    *DPI.get_or_init(|| match unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() } {
+        0 => 96,
+        d => d as i32,
+    })
+}
+
+/// A size designed for 96 DPI, scaled to the DPI of the system.
+pub fn scale(v: i32) -> i32 {
+    (v as i64 * dpi() as i64 / 96) as i32
+}
+
+/// The font of message boxes of the system (at the system DPI) for the controls; the old stock font if it cannot
+/// be read.
 pub unsafe fn gui_font() -> HFONT {
-    GetStockObject(DEFAULT_GUI_FONT) as HFONT
+    use std::sync::OnceLock;
+    static FONT: OnceLock<usize> = OnceLock::new();
+    *FONT.get_or_init(|| {
+        let mut ncm: NONCLIENTMETRICSW = std::mem::zeroed();
+        ncm.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+        let ok = windows_sys::Win32::UI::HiDpi::SystemParametersInfoForDpi(
+            SPI_GETNONCLIENTMETRICS, ncm.cbSize, &mut ncm as *mut _ as *mut _, 0, dpi() as u32,
+        );
+        let font = if ok != 0 { CreateFontIndirectW(&ncm.lfMessageFont) } else { null_mut() };
+        if font.is_null() {
+            GetStockObject(DEFAULT_GUI_FONT) as usize
+        } else {
+            font as usize
+        }
+    }) as HFONT
 }
 
 pub unsafe fn make_ctrl(
@@ -130,7 +159,7 @@ pub unsafe fn make_ctrl(
 ) -> HWND {
     let h = CreateWindowExW(
         ex, w(class).as_ptr(), w(text).as_ptr(), WS_CHILD | WS_VISIBLE | style,
-        x, y, wd, ht, parent, id as usize as HMENU, hinstance(), null(),
+        scale(x), scale(y), scale(wd), scale(ht), parent, id as usize as HMENU, hinstance(), null(),
     );
     if !h.is_null() {
         SendMessageW(h, WM_SETFONT, gui_font() as WPARAM, 1);
@@ -152,7 +181,7 @@ pub unsafe fn make_window(
     wc.lpszClassName = cls.as_ptr();
     wc.hIcon = LoadIconW(hi, std::ptr::without_provenance::<u16>(1));
     RegisterClassW(&wc);
-    let mut r = RECT { left: 0, top: 0, right: cw, bottom: ch };
+    let mut r = RECT { left: 0, top: 0, right: scale(cw), bottom: scale(ch) };
     AdjustWindowRectEx(&mut r, style, 0, 0);
     let (ww, wh) = (r.right - r.left, r.bottom - r.top);
     let x = (GetSystemMetrics(SM_CXSCREEN) - ww) / 2;

@@ -1,10 +1,8 @@
 //! Engine of the BEFORE / AFTER sections: .ini reading, x86/x64 filter,
 //! keyword normalization, section/parameter validation and execution.
 
-use crate::ctx::{exit_now, Ctx, Prog, Section, TaskKind};
-use crate::ini::IniDoc;
+use crate::ctx::{Ctx, Prog, Section, TaskKind};
 use crate::{ops_fs, ops_misc, ops_reg, util};
-use util::eq_ic;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Allowed {
@@ -105,9 +103,8 @@ fn normalize(raw_key: &str, os_arch: &str) -> Option<String> {
 
 /// `BeforeSecIni` / `AfterSecIni`.
 pub fn init_section(ctx: &mut Ctx, sec: Section) -> Vec<TaskKind> {
-    let doc = IniDoc::load(&ctx.ini_path);
-    let pairs = doc.section_pairs(sec.name()).unwrap_or_default();
-    ctx.log(&format!("[{} Section Tasks List - Raw]", sec.name().to_string() + ""));
+    let pairs = ctx.ini.section_pairs(sec.name()).unwrap_or_default();
+    ctx.log(&format!("[{} Section Tasks List - Raw]", sec.name()));
     for (k, v) in &pairs {
         ctx.log(&format!("{}|{}", k, v));
     }
@@ -225,10 +222,7 @@ fn exec_user(ctx: &mut Ctx, sec: Section, kw: &str, args: &[String], raw_key: &s
 fn run_all_prog(ctx: &mut Ctx, args: &[String]) {
     let v = if args.is_empty() { 0 } else { ctx.expand_num(&args[0]) };
     if v == 1 {
-        let list = std::mem::take(&mut ctx.after_prog);
-        for p in &list {
-            run_prog(ctx, p);
-        }
+        run_pending_prog(ctx);
     }
 }
 
@@ -237,11 +231,10 @@ pub fn process_before(ctx: &mut Ctx) {
     let mut tasks = std::mem::take(&mut ctx.before);
     for pass in 0..2 {
         for t in tasks.iter_mut() {
-            if let TaskKind::User { kw, args, raw_key, .. } = t.clone() {
-                let first = RUN_FIRST_BEFORE.contains(&kw.as_str());
-                if (pass == 0) == first {
+            let now = matches!(&*t, TaskKind::User { kw, .. } if (pass == 0) == RUN_FIRST_BEFORE.contains(&kw.as_str()));
+            if now {
+                if let TaskKind::User { kw, args, raw_key, .. } = std::mem::replace(t, TaskKind::Done) {
                     exec_user(ctx, Section::Before, &kw, &args, &raw_key);
-                    *t = TaskKind::Done;
                 }
             }
         }
@@ -254,10 +247,10 @@ pub fn process_before(ctx: &mut Ctx) {
 pub fn process_after(ctx: &mut Ctx) {
     let mut tasks = std::mem::take(&mut ctx.after);
     for t in tasks.iter_mut() {
-        if let TaskKind::User { kw, args, raw_key, .. } = t.clone() {
-            if RUN_FIRST_AFTER.contains(&kw.as_str()) {
+        let now = matches!(&*t, TaskKind::User { kw, .. } if RUN_FIRST_AFTER.contains(&kw.as_str()));
+        if now {
+            if let TaskKind::User { kw, args, raw_key, .. } = std::mem::replace(t, TaskKind::Done) {
                 exec_user(ctx, Section::After, &kw, &args, &raw_key);
-                *t = TaskKind::Done;
             }
         }
     }
@@ -272,26 +265,27 @@ pub fn process_after(ctx: &mut Ctx) {
         }
     }
     if !deferred {
-        let list = std::mem::take(&mut ctx.after_prog);
-        for p in &list {
-            run_prog(ctx, p);
-        }
+        run_pending_prog(ctx);
     }
     for t in tasks.iter_mut() {
-        if let TaskKind::User { kw, args, raw_key, .. } = t.clone() {
+        if let TaskKind::User { kw, args, raw_key, .. } = std::mem::replace(t, TaskKind::Done) {
             exec_user(ctx, Section::After, &kw, &args, &raw_key);
-            *t = TaskKind::Done;
         }
     }
     // restore = 1 never reached (e.g., removed by architecture): leave nothing pending.
-    if deferred && !ctx.after_prog.is_empty() {
-        let list = std::mem::take(&mut ctx.after_prog);
-        for p in &list {
-            run_prog(ctx, p);
-        }
+    if deferred {
+        run_pending_prog(ctx);
     }
     ctx.log("[After Section Tasks List - Processed]");
     log_state(ctx);
+}
+
+/// Runs the automatic tasks of the AFTER queue that are still pending.
+fn run_pending_prog(ctx: &mut Ctx) {
+    let list = std::mem::take(&mut ctx.after_prog);
+    for p in &list {
+        run_prog(ctx, p);
+    }
 }
 
 fn log_state(ctx: &Ctx) {
@@ -304,8 +298,53 @@ fn log_state(ctx: &Ctx) {
     }
 }
 
-#[allow(dead_code)]
-fn _unused() {
-    let _ = exit_now as fn() -> !;
-    let _ = eq_ic("", "");
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbols_become_internal_names() {
+        for (raw, want) in [
+            ("->dir", "ltrdir"),
+            ("<-file", "rtlfile"),
+            ("(file)", "pfilep"),
+            ("(regvalue)", "pregvaluep"),
+            ("+regkey", "plusregkey"),
+            ("-dir", "minusdir"),
+            ("Run", "grun"),
+            ("IniRead", "giniread"),
+            ("iniwrite", "giniwrite"),
+            ("StringReplace", "gstringreplace"),
+            ("Clean", "clean"),
+        ] {
+            assert_eq!(normalize(raw, "x64").as_deref(), Some(want), "{raw}");
+        }
+    }
+
+    #[test]
+    fn architecture_filter() {
+        // "x64" in the key: the item is for 64-bit Windows only; the word is removed when it applies
+        assert_eq!(normalize("+regvalue x64", "x64").as_deref(), Some("plusregvalue"));
+        assert_eq!(normalize("+regvalue x64", "x86"), None);
+        assert_eq!(normalize("->dir x86", "x86").as_deref(), Some("ltrdir"));
+        assert_eq!(normalize("->dir x86", "x64"), None);
+        // both words, or none
+        assert_eq!(normalize("->dir x86 x64", "x64"), None);
+        assert_eq!(normalize("->dir", "x86").as_deref(), Some("ltrdir"));
+    }
+
+    #[test]
+    fn every_keyword_of_the_template_has_a_spec() {
+        for raw in [
+            "dir", "file", "regkey", "regvalue", "(dir)", "(file)", "(regkey)", "(regvalue)", "->dir", "<-dir", "->file",
+            "<-file", "->regkey", "<-regkey", "->regvalue", "<-regvalue", "+dir", "+file", "+regkey", "+regvalue",
+            "-dir", "-file", "-regkey", "-regvalue", "attributes", "batch", "clean", "clip", "date", "delay", "envvar",
+            "iniread", "iniwrite", "keeponly", "killprocess", "message", "nowait", "quit", "regdll", "regexport",
+            "regimport", "regmerge", "replace", "replaceline", "restore", "run", "service", "stringreplace", "symlink",
+            "systemrefresh", "uservar",
+        ] {
+            let kw = normalize(raw, "x64").unwrap();
+            assert!(SPECS.iter().any(|s| s.name == kw), "{raw} -> {kw}");
+        }
+    }
 }
