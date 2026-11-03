@@ -129,6 +129,7 @@ pub fn cmdline_raw() -> String {
 
 pub struct ProcInfo {
     pub pid: u32,
+    pub parent: u32,
     pub name: String,
 }
 
@@ -143,7 +144,11 @@ pub fn list_processes() -> Vec<ProcInfo> {
         pe.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         if Process32FirstW(snap, &mut pe) != 0 {
             loop {
-                out.push(ProcInfo { pid: pe.th32ProcessID, name: from_w(&pe.szExeFile) });
+                out.push(ProcInfo {
+                    pid: pe.th32ProcessID,
+                    parent: pe.th32ParentProcessID,
+                    name: from_w(&pe.szExeFile),
+                });
                 if Process32NextW(snap, &mut pe) == 0 {
                     break;
                 }
@@ -157,6 +162,40 @@ pub fn list_processes() -> Vec<ProcInfo> {
 /// Handles of the processes gaP started and does not wait for on the spot (the main application and the `run`
 /// items without `wait`), as `usize` so the list can be a static.
 static CHILDREN: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+/// Ids of every process gaP started (also the ones it waited for), to find what they left running (debug log only).
+static LAUNCHED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Processes alive now that gaP started or that descend from one it started, as (id, parent id, name). The tree is
+/// followed through the parent ids of the snapshot, so a process whose parent already ended is still found when the
+/// id of that parent is one gaP started. The system keeps the id of the parent, not a link to it: a process whose
+/// parent is a dead descendant (not one gaP started) is not found.
+pub fn launched_descendants() -> Vec<(u32, u32, String)> {
+    let me = unsafe { GetCurrentProcessId() };
+    let started: Vec<u32> = LAUNCHED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut tree = started.clone();
+    let all = list_processes();
+    let mut found: Vec<(u32, u32, String)> = Vec::new();
+    loop {
+        let before = tree.len();
+        for p in &all {
+            if p.pid != me && p.pid != p.parent && !tree.contains(&p.pid) && tree.contains(&p.parent) {
+                tree.push(p.pid);
+                found.push((p.pid, p.parent, p.name.clone()));
+            }
+        }
+        if tree.len() == before {
+            break;
+        }
+    }
+    // The processes gaP started that are still running are listed too.
+    for p in &all {
+        if started.contains(&p.pid) && !found.iter().any(|f| f.0 == p.pid) {
+            found.push((p.pid, p.parent, p.name.clone()));
+        }
+    }
+    found
+}
 
 /// The processes that gaP started and that are still running. The handles of the ones that already ended are
 /// closed and dropped.
@@ -232,6 +271,7 @@ pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<(), u32
             return Err(GetLastError());
         }
         CloseHandle(pi.hThread);
+        LAUNCHED.lock().unwrap_or_else(|e| e.into_inner()).push(pi.dwProcessId);
         if wait {
             WaitForSingleObject(pi.hProcess, INFINITE);
             CloseHandle(pi.hProcess);

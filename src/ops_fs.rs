@@ -537,7 +537,11 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
     let order = ctx.expand(arg(args, 3));
     let param = ctx.expand(arg(args, 4)).to_lowercase();
     let number = ctx.expand_num(arg(args, 5)).max(0) as usize;
+    // The folder as gaP resolved it: a relative path is resolved against the folder of gaP.exe, and the log is where
+    // to see which folder that was.
+    ctx.log(&format!("keeponly: \"{}\" resolved to \"{}\"", arg(args, 0), path));
     if !util::is_dir(&path) {
+        ctx.log(&format!("keeponly: the folder \"{}\" does not exist, nothing to do", path));
         return;
     }
     let kind = if eq_ic(&typ, "file") {
@@ -558,6 +562,13 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     let items = util::list_dir(&path, if filter.is_empty() || is_null(&filter) { "*" } else { &filter }, kind);
+    ctx.log(&format!(
+        "keeponly: {} item(s) match \"{}\" in \"{}\", {} to keep",
+        items.len(),
+        if filter.is_empty() || is_null(&filter) { "*" } else { &filter },
+        path,
+        number
+    ));
     if items.len() <= number {
         return;
     }
@@ -596,6 +607,7 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
             Kind::Files => util::delete_files(&p) == 0,
             _ => util::remove_dir_recursive(&p),
         };
+        ctx.log(&format!("keeponly: delete \"{}\": {}", p, if ok { "done" } else { "FAILED" }));
         if !ok {
             failed.push(p);
         }

@@ -6,7 +6,7 @@
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::Storage::FileSystem::DELETE;
+use windows_sys::Win32::Storage::FileSystem::{DELETE, WRITE_DAC};
 use windows_sys::Win32::System::Registry::*;
 
 use crate::util::{from_w, w};
@@ -91,9 +91,14 @@ fn open(root: HKEY, sub: &str, access: u32, view: View) -> Result<Key, u32> {
 /// Creates the key (or opens it if it exists) with the rights to add values and subkeys and no more: not the
 /// right to change who owns the key or who can use it.
 fn create(root: HKEY, sub: &str, view: View) -> Result<Key, u32> {
+    create_access(root, sub, KEY_WRITE, view)
+}
+
+/// `create` with the rights `access`.
+fn create_access(root: HKEY, sub: &str, access: u32, view: View) -> Result<Key, u32> {
     let mut h: HKEY = null_mut();
     let r = unsafe {
-        RegCreateKeyExW(root, w(sub).as_ptr(), 0, null(), 0, KEY_WRITE | view.sam(), null(), &mut h, null_mut())
+        RegCreateKeyExW(root, w(sub).as_ptr(), 0, null(), 0, access | view.sam(), null(), &mut h, null_mut())
     };
     if r == 0 {
         Ok(Key(h))
@@ -247,16 +252,91 @@ pub fn delete_tree(path: &str, view: View) -> Result<(), u32> {
     Err(last)
 }
 
-/// Copies values and subkeys from `src` to `dst` (REG COPY /s /f). The error is the system code;
-/// `ERROR_FILE_NOT_FOUND` means the source does not exist.
-pub fn copy_tree(src: &str, dst: &str, view: View) -> Result<(), u32> {
-    let (Some((sr, ss)), Some((dr, ds))) = (parse(src), parse(dst)) else { return Err(ERROR_INVALID_PARAMETER) };
-    let sk = open(sr, &ss, KEY_READ, view)?;
-    let dk = create(dr, &ds, view)?;
-    match unsafe { RegCopyTreeW(sk.0, null(), dk.0) } {
+/// Deletes every value and subkey of the key but not the key itself (`RegDeleteTree` with no subkey). A key that is
+/// not there is not an error. Unlike `delete_tree`, the name of the key is never left in the "being deleted" state
+/// that makes the next create of it fail with "access denied" while another program still has the key open.
+pub fn clear_tree(path: &str, view: View) -> Result<(), u32> {
+    let (root, sub) = parse(path).ok_or(ERROR_INVALID_PARAMETER)?;
+    if sub.is_empty() {
+        return Err(ERROR_INVALID_PARAMETER);
+    }
+    let access = DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | KEY_SET_VALUE;
+    let k = match open(root, &sub, access, view) {
+        Ok(k) => k,
+        Err(ERROR_FILE_NOT_FOUND) => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    match unsafe { RegDeleteTreeW(k.0, null()) } {
         0 => Ok(()),
         e => Err(e),
     }
+}
+
+/// Why a copy of a key failed: the system code and the step that returned it.
+#[derive(Clone, Copy, Debug)]
+pub struct CopyError {
+    pub code: u32,
+    pub step: &'static str,
+}
+
+/// The step of `copy_tree` that opens the source: its `ERROR_FILE_NOT_FOUND` means "nothing to copy".
+pub const STEP_OPEN_SOURCE: &str = "open source";
+
+/// A key that another program still has open after it was deleted stays in the system until that program closes it,
+/// and in the meantime the system answers "access denied" (or "key deleted") to whoever creates it again. The program
+/// usually closes it within moments, so a copy that fails this way is tried again for a short time.
+const COPY_RETRIES: u32 = 25;
+const COPY_RETRY_MS: u64 = 100;
+
+fn copy_busy(code: u32) -> bool {
+    code == ERROR_ACCESS_DENIED || code == ERROR_KEY_DELETED
+}
+
+/// `RegCopyTree` also copies the security descriptor of the key, and the documentation lists only `KEY_CREATE_SUB_KEY`
+/// among the rights the target needs. Reports of programs that open the target with the documented rights only say it
+/// answers "access denied" for keys whose descriptor is not the inherited one, and that the full rights fix it. The
+/// widest rights the user has come first and the narrow `KEY_WRITE` last, so a target that cannot be opened with the
+/// wide ones is copied as before.
+const TARGET_ACCESS: [u32; 3] = [KEY_ALL_ACCESS, KEY_WRITE | WRITE_DAC, KEY_WRITE];
+
+fn copy_once(sk: &Key, dr: HKEY, ds: &str, view: View) -> Result<(), CopyError> {
+    let mut last = ERROR_ACCESS_DENIED;
+    for access in TARGET_ACCESS {
+        match create_access(dr, ds, access, view) {
+            Ok(dk) => {
+                return match unsafe { RegCopyTreeW(sk.0, null(), dk.0) } {
+                    0 => Ok(()),
+                    code => Err(CopyError { code, step: "copy tree" }),
+                };
+            }
+            Err(code) => last = code,
+        }
+    }
+    Err(CopyError { code: last, step: "create target" })
+}
+
+/// Copies values and subkeys from `src` to `dst` (REG COPY /s /f). The error has the system code and the step that
+/// failed; `ERROR_FILE_NOT_FOUND` in the step `STEP_OPEN_SOURCE` means the source does not exist.
+pub fn copy_tree(src: &str, dst: &str, view: View) -> Result<(), CopyError> {
+    let (Some((sr, ss)), Some((dr, ds))) = (parse(src), parse(dst)) else {
+        return Err(CopyError { code: ERROR_INVALID_PARAMETER, step: "read the paths" });
+    };
+    let sk = open(sr, &ss, KEY_READ, view).map_err(|code| CopyError { code, step: STEP_OPEN_SOURCE })?;
+    let mut tries = 0;
+    loop {
+        match copy_once(&sk, dr, &ds, view) {
+            Err(e) if copy_busy(e.code) && tries < COPY_RETRIES => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(COPY_RETRY_MS));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// The path is under HKEY_CURRENT_USER, where an administrator right is not what a change needs.
+pub fn is_hkcu(path: &str) -> bool {
+    parse(path).is_some_and(|(root, _)| root == HKEY_CURRENT_USER)
 }
 
 pub fn enum_subkeys(path: &str, view: View) -> Vec<String> {

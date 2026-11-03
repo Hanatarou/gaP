@@ -1,5 +1,5 @@
 //! gaP: great! another Portabilizer — Rust port of the AutoIt program
-//! (v2.1.1.0; the last AutoIt version was 1.1.5.0).
+//! (v2.1.2.0; the last AutoIt version was 1.1.5.0).
 #![windows_subsystem = "windows"]
 #![allow(clippy::too_many_arguments)]
 
@@ -171,5 +171,24 @@ fn run_main_app(ctx: &mut Ctx) {
         while sys::window_title_exists(&ctx.waitprocess) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
+    }
+    log_leftovers(ctx);
+}
+
+/// Debug log: what still runs of the processes gaP started at the moment it decides the main application is closed
+/// and runs the AFTER section. A process listed here can still have the files and registry keys the AFTER section
+/// is going to change.
+fn log_leftovers(ctx: &Ctx) {
+    if ctx.debug.is_none() {
+        return;
+    }
+    let left = sys::launched_descendants();
+    if left.is_empty() {
+        ctx.log("[Main application closed] nothing started by gaP is running");
+        return;
+    }
+    ctx.log("[Main application closed] still running (pid, parent pid, name):");
+    for (pid, parent, name) in left {
+        ctx.log(&format!("  {}, {}, {}", pid, parent, name));
     }
 }

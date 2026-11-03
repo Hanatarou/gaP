@@ -7,7 +7,7 @@ use crate::ini::IniDoc;
 use crate::{crypto, ipc, reg, sys, ui, util};
 
 pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
-pub const PROGRAM_VERSION: &str = "2.1.1.0";
+pub const PROGRAM_VERSION: &str = "2.1.2.0";
 
 /// Names of the shell folders accepted as `%Name%` (order of the original).
 /// (name, fallback CSIDL, is_HKLM)
@@ -70,6 +70,8 @@ pub enum Prog {
     LtrFile { src: String, tgt: String, mv: bool, ow: bool },
     RegExport { key: String, file: String, view: reg::View },
     MinusRegKey { key: String, if_empty: bool, view: reg::View },
+    /// Empties the key (values and subkeys) and keeps the key itself: the step before a restore.
+    ClearRegKey { key: String, view: reg::View },
     MinusRegValue { key: String, name: String, view: reg::View },
     LtrRegKey { src: String, tgt: String, mv: bool, view: reg::View },
     LtrRegValue { src: String, tgt: String, mv: bool, view: reg::View },
