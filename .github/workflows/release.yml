@@ -3,7 +3,7 @@ name: Build release
 # The program that is released is the smallest one: profile `release` (opt-level z, LTO, panic=abort, stripped) built
 # with a nightly Rust that rebuilds the standard library for size (-Z build-std) and drops the panic machinery
 # (-Cpanic=immediate-abort). The nightly is not pinned: every build uses the newest one.
-# The version in the name of the files is the tag of the release (v2.1.1.0). A release is refused if its tag is not the
+# The version in the name of the files is the tag of the release (v2.1.2.0). A release is refused if its tag is not the
 # version of Cargo.toml and of res/resources.rc.
 # Two Windows builds are made: 64-bit (x86_64-pc-windows-msvc) and 32-bit (i686-pc-windows-msvc). Both are built
 # on the same Windows runner. Clippy, the tests and the build of each architecture run side by side, so a run lasts
