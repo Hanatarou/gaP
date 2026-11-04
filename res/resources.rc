@@ -8,8 +8,8 @@
 1 24 "gap.manifest"
 
 1 VERSIONINFO
- FILEVERSION 2,1,2,0
- PRODUCTVERSION 2,1,2,0
+ FILEVERSION 2,1,3,0
+ PRODUCTVERSION 2,1,3,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -23,12 +23,12 @@ BEGIN
             VALUE "CompanyName", "Bruno Eduardo"
             VALUE "Comments", "gaP: great! another Portabilizer"
             VALUE "FileDescription", "gaP: great! another Portabilizer"
-            VALUE "FileVersion", "2.1.2.0"
+            VALUE "FileVersion", "2.1.3.0"
             VALUE "InternalName", "gaP"
             VALUE "LegalCopyright", "Copyright (c) 2015-2026 Bruno Eduardo"
             VALUE "OriginalFilename", "gaP.exe"
             VALUE "ProductName", "gaP: great! another Portabilizer"
-            VALUE "ProductVersion", "2.1.2.0"
+            VALUE "ProductVersion", "2.1.3.0"
         END
     END
     BLOCK "VarFileInfo"

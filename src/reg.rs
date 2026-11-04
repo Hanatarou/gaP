@@ -129,6 +129,22 @@ pub fn key_exists(path: &str, view: View) -> bool {
     key_state(path, view) > 0
 }
 
+/// The key is there, even if the current user is not allowed to open it (`key_exists` takes such a key for a missing
+/// one, because it only counts what it can read).
+pub fn key_present(path: &str, view: View) -> bool {
+    let Some((root, sub)) = parse(path) else { return false };
+    match open(root, &sub, KEY_READ, view) {
+        Ok(_) => true,
+        Err(code) => code != ERROR_FILE_NOT_FOUND && code != ERROR_PATH_NOT_FOUND,
+    }
+}
+
+/// The key can be opened for reading. The error is the system code.
+pub fn readable(path: &str, view: View) -> Result<(), u32> {
+    let (root, sub) = parse(path).ok_or(ERROR_INVALID_PARAMETER)?;
+    open(root, &sub, KEY_READ, view).map(|_| ())
+}
+
 pub struct Value {
     pub kind: u32,
     pub data: Vec<u8>,

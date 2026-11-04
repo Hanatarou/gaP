@@ -85,39 +85,45 @@ fn recover_replaced(ctx: &Ctx, tgt: &str) {
     }
 }
 
-/// Core of `->dir`/`<-dir` with already resolved paths. What fails is written to the debug log.
-pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
+/// Core of `->dir`/`<-dir` with already resolved paths. What fails is written to the debug log. `false` = the
+/// operation failed; nothing to do (no source) is not a failure.
+pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool {
     if eq_ic(&norm_cmp(src), &norm_cmp(tgt)) || !util::is_dir(src) {
-        return;
+        return true;
     }
     if is_inside(tgt, src) || (mv && is_inside(src, tgt)) {
         ctx.msg(&format!("Directory operation skipped: \"{}\" and \"{}\" are nested.", src, tgt));
-        return;
+        return false;
     }
     let (s, t) = (std::path::Path::new(src), std::path::Path::new(tgt));
     match (mv, ow) {
         (false, ow) => {
             let mut errors = Vec::new();
             util::copy_dir(s, t, ow, &mut errors);
+            let ok = errors.is_empty();
             for e in errors {
                 ctx.log_err(&format!("copy \"{}\" to \"{}\"", src, tgt), &e);
             }
+            ok
         }
         (true, true) => {
             let tgt = util::trim_trailing_sep(tgt);
             recover_replaced(ctx, &tgt);
             if !occupied(&tgt) {
-                if let Err(e) = util::move_dir(src, &tgt) {
-                    ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
-                }
-                return;
+                return match util::move_dir(src, &tgt) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
+                        false
+                    }
+                };
             }
             // The old target is moved aside, not deleted: if the move fails it is put back, so a failure never
             // costs the data that was there.
             let aside = free_name(&format!("{}{}", tgt, ASIDE));
             if let Err(e) = std::fs::rename(&tgt, &aside) {
                 ctx.log_err(&format!("replace \"{}\" (it cannot be moved aside)", tgt), &e);
-                return;
+                return false;
             }
             match util::move_dir(src, &tgt) {
                 Ok(()) => {
@@ -129,6 +135,7 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
                     if !util::remove_dir_recursive(&old) {
                         ctx.log(&format!("ERROR delete the previous content \"{}\"", old));
                     }
+                    true
                 }
                 Err(e) => {
                     ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
@@ -140,13 +147,19 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
                             tgt, aside
                         ));
                     }
+                    false
                 }
             }
         }
         (true, false) => {
-            if !util::exists(tgt) {
-                if let Err(e) = util::move_dir(src, tgt) {
+            if util::exists(tgt) {
+                return true;
+            }
+            match util::move_dir(src, tgt) {
+                Ok(()) => true,
+                Err(e) => {
                     ctx.log_err(&format!("move \"{}\" to \"{}\"", src, tgt), &e);
+                    false
                 }
             }
         }
@@ -154,20 +167,26 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
 }
 
 /// Core of `->file`/`<-file` with resolved FILE paths.
-pub fn transfer_file(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) {
+pub fn transfer_file(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool {
     if eq_ic(src, tgt) || !util::is_file(src) {
-        return;
+        return true;
     }
     let r = if mv { util::move_file(src, tgt, ow) } else { util::copy_file(src, tgt, ow) };
     if let Err(e) = r {
         ctx.log_err(&format!("{} \"{}\" to \"{}\"", if mv { "move" } else { "copy" }, src, tgt), &e);
+        return false;
     }
+    true
 }
 
 pub fn run_prog_fs(ctx: &Ctx, p: &Prog) {
     match p {
-        Prog::LtrDir { src, tgt, mv, ow } => transfer_dir(ctx, src, tgt, *mv, *ow),
-        Prog::LtrFile { src, tgt, mv, ow } => transfer_file(ctx, src, tgt, *mv, *ow),
+        Prog::LtrDir { src, tgt, mv, ow } => {
+            transfer_dir(ctx, src, tgt, *mv, *ow);
+        }
+        Prog::LtrFile { src, tgt, mv, ow } => {
+            transfer_file(ctx, src, tgt, *mv, *ow);
+        }
         _ => {}
     }
 }
@@ -240,13 +259,21 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
     transfer_file(ctx, &src, &tgt, mv, ow);
 }
 
+/// An item whose original data could not be saved is skipped: nothing was changed.
+fn not_saved(ctx: &Ctx, what: &str, src: &str) {
+    ctx.msg(&format!("The original {} \"{}\" could not be saved, so this item was skipped and nothing was changed.", what, src));
+}
+
 /// `dir = Source [:: Destination]` (BEFORE only).
 pub fn dir_kw(ctx: &mut Ctx, args: &[String]) {
     let src = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let tgt = if is_null(arg(args, 1)) { default_settings_dir(ctx) } else { full(ctx, arg(args, 1)) };
     let tgt = util::trim_trailing_sep(&tgt);
     let backup = format!("{}_backup", src);
-    transfer_dir(ctx, &src, &backup, true, true);
+    if !transfer_dir(ctx, &src, &backup, true, true) {
+        not_saved(ctx, "folder", &src);
+        return;
+    }
     transfer_dir(ctx, &tgt, &src, false, true);
     ctx.after_prog.push(Prog::LtrDir { src: src.clone(), tgt, mv: true, ow: true });
     ctx.after_prog.push(Prog::LtrDir { src: backup, tgt: src, mv: true, ow: true });
@@ -262,7 +289,10 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
         resolve_file_target(ctx, &src, &t)
     };
     let backup = format!("{}_backup", src);
-    transfer_file(ctx, &src, &backup, true, true);
+    if !transfer_file(ctx, &src, &backup, true, true) {
+        not_saved(ctx, "file", &src);
+        return;
+    }
     transfer_file(ctx, &settings, &src, false, true);
     ctx.after_prog.push(Prog::LtrFile { src: src.clone(), tgt: settings, mv: true, ow: true });
     ctx.after_prog.push(Prog::LtrFile { src: backup, tgt: src, mv: true, ow: true });
@@ -272,7 +302,10 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let backup = format!("{}_backup", src);
-    transfer_dir(ctx, &src, &backup, true, true);
+    if !transfer_dir(ctx, &src, &backup, true, true) {
+        not_saved(ctx, "folder", &src);
+        return;
+    }
     ctx.after_prog.push(Prog::LtrDir { src: backup, tgt: src, mv: true, ow: true });
 }
 
@@ -280,8 +313,20 @@ pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = full(ctx, arg(args, 0));
     let backup = format!("{}_backup", src);
-    transfer_file(ctx, &src, &backup, true, true);
+    if !transfer_file(ctx, &src, &backup, true, true) {
+        not_saved(ctx, "file", &src);
+        return;
+    }
     ctx.after_prog.push(Prog::LtrFile { src: backup, tgt: src, mv: true, ow: true });
+}
+
+/// The `_backup` item that an interrupted run left for the keyword `kw` (`dir`, `(dir)`, `file` or `(file)`), if it
+/// is still there.
+pub fn leftover_backup(ctx: &mut Ctx, kw: &str, args: &[String]) -> Option<String> {
+    let src = full(ctx, arg(args, 0));
+    let src = if kw.contains("dir") { util::trim_trailing_sep(&src) } else { src };
+    let backup = format!("{}_backup", src);
+    occupied(&backup).then_some(backup)
 }
 
 // ----------------------------------------------------------- create / delete

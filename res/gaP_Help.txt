@@ -1,6 +1,6 @@
 [Revision]
 
-This file is Revision 5 from 01/NOV/2026 (gaP 2.0.0.0, the Rust port; the
+This file is Revision 6 from 03/NOV/2026 (gaP 2.1.3.0, the Rust port; the
 source code and the releases are at the gaP repository, #15). Revision 4,
 from 18/JUL/2015, was the last one of the AutoIt version.
 
@@ -431,16 +431,17 @@ Notes:
 [!waitprocess]
 Description:
 
-Title (or part of the title) of a process that should be closed before
-executing AFTER items.
+Title (or part of the title) of a window, or name of a process, that should
+be closed before executing AFTER items.
 
 Syntax:
 
-!waitprocess = Full or partial process title
+!waitprocess = Full or partial window title, or process name
 
 Examples:
 
 !waitprocess = - Notepad++           ; wait for all applications to close having "- Notepad++" in title
+!waitprocess = MyTrayApp.exe         ; wait for all processes named "MyTrayApp.exe" (or "MyTrayApp") to end
 
 Notes:
 
@@ -448,9 +449,14 @@ Notes:
   cases gaP would execute AFTER items right after closing the main application.
   By specifying a process to wait it is possible to run AFTER items only when
   the process terminates;
-* The value can be the full title of a process window or only part of
-  it. Be careful not adding too generic values; and
-* All matching processes should be closed to start executing AFTER items.
+* The value can be the full title of a window or only part of it. Be careful
+  not adding too generic values;
+* The value is also compared with the names of the running processes (with or
+  without ".exe", upper or lower case, the whole name). This is how an
+  application that has no window, such as one that lives in the notification
+  area, is waited for; and
+* All matching windows and processes should be closed to start executing
+  AFTER items.
 
 [Keywords to use in BEFORE and AFTER sections]
 
@@ -473,6 +479,13 @@ Notes:
 * This function works ONLY in the BEFORE section;
 * If target directory is missing the "Settings" subdirectory of the
   launcher will be used;
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup directory "C:\Dir" to "C:\Dir_backup"
 2. create directory "C:\Dir"
@@ -502,6 +515,13 @@ Notes:
 * This function works ONLY in the BEFORE section;
 * If the target file or directory is missing the launcher directory
   will be used;
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup file "C:\Dir\MyFile.ini" to "C:\Dir\MyFile.ini_backup"
 2. copy file "{GAPROOT}\SubDir\MyFile.ini" to directory "C:\Dir"
@@ -531,14 +551,24 @@ Notes:
 * If the target registry export file is missing the registry key will
   be exported to "settings.reg" to the launcher's root directory;
 * If the Registry flag is not declared it defaults to "x86";
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup regkey "HKCU\Software\RegKey" to "HKCU\Software\RegKey_backup"
 2. import file "settings.reg" to the registry
 * Operations on AFTER section:
 1. export regkey "HKCU\Software\RegKey" to "settings.reg"
-2. delete regkey "HKCU\Software\RegKey"
-3. restore regkey "HKCU\Software\RegKey_backup" to "HKCU\Software\RegKey"
-4. delete empty parent regkeys if regkey is a subkey of "HKCU\Software"
+2. check that "HKCU\Software\RegKey_backup" can be read; if it can't,
+   "HKCU\Software\RegKey" is left as it is and nothing is removed
+3. delete the content of regkey "HKCU\Software\RegKey"
+4. restore regkey "HKCU\Software\RegKey_backup" to "HKCU\Software\RegKey"
+   and delete "HKCU\Software\RegKey_backup"
+5. delete empty parent regkeys if regkey is a subkey of "HKCU\Software"
    or "HKLM\Software"
 
 [regvalue]
@@ -563,6 +593,13 @@ Notes:
 * If the target registry export file is not set the registry value
   will be exported to "settings.reg" to the launcher's root directory;
 * If the Registry flag is not declared it defaults to "x86";
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup reg value "HKCU\Software\Key\Value" to
    "HKCU\Software\Key\Value_backup"
@@ -591,6 +628,13 @@ Examples:
 Notes:
 
 * This function works ONLY in the BEFORE section;
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup directory "C:\Dir" to "C:\Dir_backup"
 * Operations on AFTER section:
@@ -612,6 +656,13 @@ Examples:
 Notes:
 
 * This function works ONLY in the BEFORE section;
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup file "C:\Dir\MyFile.ini" to "C:\Dir\MyFile.ini_backup"
 * Operations on AFTER section:
@@ -634,12 +685,22 @@ Notes:
 
 * This function works ONLY in the BEFORE section;
 * If the Registry flag is not declared it defaults to "x86";
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup regkey "HKCU\Software\RegKey" to "HKCU\Software\RegKey_backup"
 * Operations on AFTER section:
-1. delete regkey "HKCU\Software\RegKey"
-2. restore regkey "HKCU\Software\RegKey_backup" to "HKCU\Software\RegKey"
-3. delete empty parent regkey(s) if regkey is a subkey of
+1. check that "HKCU\Software\RegKey_backup" can be read; if it can't,
+   "HKCU\Software\RegKey" is left as it is and nothing is removed
+2. delete the content of regkey "HKCU\Software\RegKey"
+3. restore regkey "HKCU\Software\RegKey_backup" to "HKCU\Software\RegKey"
+   and delete "HKCU\Software\RegKey_backup"
+4. delete empty parent regkey(s) if regkey is a subkey of
    "HKCU\Software" or "HKLM\Software" 
 
 [(regvalue)]
@@ -659,6 +720,13 @@ Notes:
 
 * This function works ONLY in the BEFORE section;
 * If the Registry flag is not declared it defaults to "x86";
+* The name ending in "_backup" is reserved: gaP uses it only while it runs.
+  If one is still there when gaP starts, an earlier run did not finish and
+  it holds your original data. gaP shows an error listing it and exits
+  (exit code 7) before changing anything. Restore it by hand or delete it
+  and run gaP again; and
+* If the original data can't be saved to "_backup", the item is skipped and
+  nothing of it is changed.
 * Operations on BEFORE section:
 1. backup reg value "HKCU\Software\Key\Value" to
    "HKCU\Software\Key\Value_backup"

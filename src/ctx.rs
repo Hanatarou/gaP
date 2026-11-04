@@ -1,13 +1,13 @@
 //! Global state of the launcher (`Ctx`) — equivalent to the `Global` variables of the
 //! AutoIt script — and types of the BEFORE/AFTER task queues.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 
 use crate::ini::IniDoc;
 use crate::{crypto, ipc, reg, sys, ui, util};
 
 pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
-pub const PROGRAM_VERSION: &str = "2.1.2.0";
+pub const PROGRAM_VERSION: &str = "2.1.3.0";
 
 /// Names of the shell folders accepted as `%Name%` (order of the original).
 /// (name, fallback CSIDL, is_HKLM)
@@ -70,10 +70,9 @@ pub enum Prog {
     LtrFile { src: String, tgt: String, mv: bool, ow: bool },
     RegExport { key: String, file: String, view: reg::View },
     MinusRegKey { key: String, if_empty: bool, view: reg::View },
-    /// Empties the key (values and subkeys) and keeps the key itself: the step before a restore.
-    ClearRegKey { key: String, view: reg::View },
+    /// Puts the key saved in `backup` back in `key` (see `ops_reg::restore_key`).
+    RestoreRegKey { key: String, backup: String, view: reg::View },
     MinusRegValue { key: String, name: String, view: reg::View },
-    LtrRegKey { src: String, tgt: String, mv: bool, view: reg::View },
     LtrRegValue { src: String, tgt: String, mv: bool, view: reg::View },
     SymlinkRemove { link: String, is_dir: bool },
     /// Removes empty parent keys under HKCU/HKLM\Software (behavior described in the help).
@@ -160,6 +159,9 @@ pub struct Ctx {
     /// Automatic tasks of the AFTER section ("PROG" lines): always before the user's.
     pub after_prog: Vec<Prog>,
     pub pw_cache: Option<String>,
+    /// While true `msg` shows nothing: the check that runs the arguments of the BEFORE items before they run (see
+    /// `tasks::stop_on_leftover_backups`) must not show a message that the item shows again when it runs.
+    pub quiet: Cell<bool>,
     /// Receives the command lines sent by the other instances (only the first instance has it).
     pub ipc: Option<ipc::Server>,
 }
@@ -204,6 +206,7 @@ impl Ctx {
             after: Vec::new(),
             after_prog: Vec::new(),
             pw_cache: None,
+            quiet: Cell::new(false),
             ipc: None,
         };
         c.init_vars();
@@ -269,7 +272,9 @@ impl Ctx {
     }
 
     pub fn msg(&self, text: &str) {
-        ui::info(&self.title, text);
+        if !self.quiet.get() {
+            ui::info(&self.title, text);
+        }
     }
 
     pub fn log(&self, text: &str) {
@@ -301,6 +306,7 @@ pub const EXIT_REQUIREMENT: i32 = 3; // a requirement of the main application is
 pub const EXIT_CANCELLED: i32 = 4; // the user cancelled a question or a password
 pub const EXIT_RUNNING: i32 = 5; // another instance is already running
 pub const EXIT_NOT_DELIVERED: i32 = 6; // the running instance did not receive the command line of this one
+pub const EXIT_BACKUP: i32 = 7; // a `_backup` item of an earlier run is still there: its original data was not restored
 
 /// `Exit`: quits without additional cleanup (as in AutoIt), with code 0.
 pub fn exit_now() -> ! {

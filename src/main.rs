@@ -1,5 +1,5 @@
 //! gaP: great! another Portabilizer — Rust port of the AutoIt program
-//! (v2.1.2.0; the last AutoIt version was 1.1.5.0).
+//! (v2.1.3.0; the last AutoIt version was 1.1.5.0).
 #![windows_subsystem = "windows"]
 #![allow(clippy::too_many_arguments)]
 
@@ -168,7 +168,7 @@ fn run_main_app(ctx: &mut Ctx) {
         }
     }
     if !ctx.waitprocess.is_empty() {
-        while sys::window_title_exists(&ctx.waitprocess) {
+        while sys::window_title_exists(&ctx.waitprocess) || sys::process_exists(&ctx.waitprocess) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
     }

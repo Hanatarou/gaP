@@ -1,8 +1,8 @@
 //! Engine of the BEFORE / AFTER sections: .ini reading, x86/x64 filter,
 //! keyword normalization, section/parameter validation and execution.
 
-use crate::ctx::{Ctx, Prog, Section, TaskKind};
-use crate::{ops_fs, ops_misc, ops_reg, util};
+use crate::ctx::{exit_code, Ctx, Prog, Section, TaskKind, EXIT_BACKUP};
+use crate::{clean, ops_fs, ops_misc, ops_reg, util};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Allowed {
@@ -230,6 +230,9 @@ fn run_all_prog(ctx: &mut Ctx, args: &[String]) {
 pub fn process_before(ctx: &mut Ctx) {
     let mut tasks = std::mem::take(&mut ctx.before);
     for pass in 0..2 {
+        if pass == 1 {
+            stop_on_leftover_backups(ctx, &tasks);
+        }
         for t in tasks.iter_mut() {
             let now = matches!(&*t, TaskKind::User { kw, .. } if (pass == 0) == RUN_FIRST_BEFORE.contains(&kw.as_str()));
             if now {
@@ -241,6 +244,36 @@ pub fn process_before(ctx: &mut Ctx) {
     }
     ctx.log("[Before Section Tasks List - Processed]");
     log_state(ctx);
+}
+
+/// `_backup` is the name gaP gives, during a run, to the original registry key, value, file or folder of `regkey`,
+/// `regvalue`, `dir`, `file` and their `(...)` forms, and removes when the run ends. One that is still there is the
+/// original data of a run that did not end: copying over it would lose it. gaP stops before changing anything.
+fn stop_on_leftover_backups(ctx: &mut Ctx, tasks: &[TaskKind]) {
+    let mut found = Vec::new();
+    for t in tasks {
+        if let TaskKind::User { kw, args, .. } = t {
+            let left = match kw.as_str() {
+                "regkey" | "regvalue" | "pregkeyp" | "pregvaluep" => ops_reg::leftover_backup(ctx, kw, args),
+                "dir" | "file" | "pdirp" | "pfilep" => ops_fs::leftover_backup(ctx, kw, args),
+                _ => None,
+            };
+            found.extend(left);
+        }
+    }
+    if found.is_empty() {
+        return;
+    }
+    for b in &found {
+        ctx.log(&format!("ERROR leftover backup \"{}\"", b));
+    }
+    ctx.msg(&format!(
+        "An earlier run did not finish and left its original data in:\n\n{}\n\nRestore or delete {} before running again. Nothing was changed.",
+        found.join("\n"),
+        if found.len() == 1 { "it" } else { "them" }
+    ));
+    clean::clean_all(&ctx.script_full, None);
+    exit_code(EXIT_BACKUP);
 }
 
 /// `AfterSecProc`.

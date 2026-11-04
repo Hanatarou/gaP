@@ -370,6 +370,19 @@ pub fn window_title_exists(part: &str) -> bool {
     }
 }
 
+/// A process other than this one runs from an executable named `name` (with or without `.exe`, case ignored). It
+/// finds the programs that have no window, such as the ones that live in the notification area.
+pub fn process_exists(name: &str) -> bool {
+    let me = std::process::id();
+    let want = name.trim().to_lowercase();
+    let want = want.strip_suffix(".exe").unwrap_or(&want).to_string();
+    !want.is_empty()
+        && list_processes().iter().any(|p| {
+            let n = p.name.to_lowercase();
+            p.pid != me && n.strip_suffix(".exe").unwrap_or(&n) == want
+        })
+}
+
 // ---------------------------------------------------------- single instance
 
 /// The mutex of this process (0 = none), kept open until the process ends or `release_singleton`.

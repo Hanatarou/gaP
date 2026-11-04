@@ -65,9 +65,10 @@ fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
 
 // NEW (gaP-rs): a copy that fails (or a move whose source cannot be removed) is reported; before it
 // was silent. A missing source is still silent: there is nothing to copy or to restore.
-pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
+/// `false` = the copy failed (it was reported); a source that is not there is not a failure, there is nothing to copy.
+pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool {
     if eq_ic(src, tgt) {
-        return;
+        return true;
     }
     match reg::copy_tree(src, tgt, view) {
         Ok(()) => {
@@ -77,36 +78,50 @@ pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
                     change_failed(ctx, &t, Some(code), &[src, tgt]);
                 }
             }
+            true
         }
-        Err(e) if e.code == ERROR_FILE_NOT_FOUND && e.step == reg::STEP_OPEN_SOURCE => {}
+        Err(e) if e.code == ERROR_FILE_NOT_FOUND && e.step == reg::STEP_OPEN_SOURCE => true,
         Err(e) => {
             // The step tells which of the calls got the error; a message to the user does not need it.
             ctx.log_err(
                 &format!("copy registry key \"{}\" to \"{}\" (step: {})", src, tgt, e.step),
                 &format!("error {}", e.code),
             );
-            let t = format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt);
+            let mut t = format!("The registry key \"{}\" could not be copied to \"{}\".", src, tgt);
+            if mv {
+                t.push_str(" The key that was to be moved was not removed.");
+            }
             change_failed(ctx, &t, Some(e.code), &[src, tgt]);
+            false
         }
     }
 }
 
-pub fn copy_value(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) {
+/// `false` = the copy failed (it was reported); a source that is not there is not a failure.
+pub fn copy_value(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool {
     if eq_ic(src, tgt) {
-        return;
+        return true;
     }
     let (sk, sv) = split_value(src);
     let (tk, tv) = split_value(tgt);
-    let Some(v) = reg::read_value(&sk, &sv, view) else { return };
+    let Some(v) = reg::read_value(&sk, &sv, view) else { return true };
     if let Err(code) = reg::write_value(&tk, &tv, v.kind, &v.data, view) {
         let t = format!("The registry value \"{}\" could not be copied to \"{}\".", src, tgt);
         change_failed(ctx, &t, Some(code), &[&sk, &tk]);
-    } else if mv {
+        return false;
+    }
+    if mv {
         if let Err(code) = reg::delete_value(&sk, &sv, view) {
             let t = format!("The registry value \"{}\" was copied but could not be removed.", src);
             change_failed(ctx, &t, Some(code), &[&sk]);
         }
     }
+    true
+}
+
+/// Message for an item that was skipped because its original data could not be saved: nothing was changed.
+fn not_saved(ctx: &Ctx, what: &str, src: &str) {
+    ctx.msg(&format!("The original {} \"{}\" could not be saved, so this item was skipped and nothing was changed.", what, src));
 }
 
 pub fn ltr_regkey(ctx: &mut Ctx, args: &[String], rtl: bool) {
@@ -171,22 +186,84 @@ pub fn minus_regkey(ctx: &mut Ctx, args: &[String]) {
     delete_key(ctx, &k, eq_ic(&eflag, "ifempty"), view);
 }
 
-/// Deletes the key (`if_empty`: only if it has no values and no subkeys). A key that is not there is not an error.
+/// Deletes the key (`if_empty`: only if it has no values and no subkeys). A key that is not there is not an error;
+/// a key that is still there after the attempt is reported.
 pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
     let st = if if_empty { reg::key_state(key, view) } else { 1 };
     if st > 0 && (!if_empty || st == 2) {
         if let Err(code) = reg::delete_tree(key, view) {
             if reg::key_exists(key, view) {
                 ctx.log(&format!("ERROR delete registry key \"{}\" (error {})", key, code));
+                change_failed(ctx, &format!("The registry key \"{}\" could not be deleted.", key), Some(code), &[key]);
             }
         }
     }
 }
 
-/// Empties the key and keeps the key itself (the step before a restore: see `reg::clear_tree`).
-pub fn clear_key(ctx: &Ctx, key: &str, view: View) {
-    if let Err(code) = reg::clear_tree(key, view) {
-        ctx.log(&format!("ERROR clear registry key \"{}\" (error {})", key, code));
+/// Empties the key (values and subkeys) and keeps the key itself, so its name is never left in the "being deleted"
+/// state (see `reg::clear_tree`). A failure is reported and `false` is returned.
+fn clear_key(ctx: &Ctx, key: &str, view: View) -> bool {
+    match reg::clear_tree(key, view) {
+        Ok(()) => true,
+        Err(code) => {
+            ctx.log(&format!("ERROR clear registry key \"{}\" (error {})", key, code));
+            change_failed(ctx, &format!("The registry key \"{}\" could not be emptied.", key), Some(code), &[key]);
+            false
+        }
+    }
+}
+
+/// Puts the key saved in `backup` back in `key` (the AFTER step of `regkey` and `(regkey)`), in an order that never
+/// removes something that cannot be put back: the saved key must be readable before anything is touched, the key
+/// is emptied only then, and the saved key is removed only after it was copied back. When something fails the
+/// message says so and what was not touched stays as it is.
+pub fn restore_key(ctx: &Ctx, key: &str, backup: &str, view: View) {
+    if !reg::key_present(backup, view) {
+        // Nothing was saved (the key did not exist before the run): only what the application made is removed.
+        clear_key(ctx, key, view);
+        return;
+    }
+    if let Err(code) = reg::readable(backup, view) {
+        ctx.log(&format!("ERROR open registry key \"{}\" (error {})", backup, code));
+        let t = format!(
+            "The saved registry key \"{}\" can't be read, so \"{}\" was left as it is and nothing was removed.",
+            backup, key
+        );
+        change_failed(ctx, &t, Some(code), &[backup, key]);
+        return;
+    }
+    if !clear_key(ctx, key, view) {
+        ctx.msg(&format!("The saved registry key \"{}\" was not restored and was not removed.", backup));
+        return;
+    }
+    copy_key(ctx, backup, key, true, view);
+}
+
+/// The `_backup` item that an interrupted run left for the registry keyword `kw` (`regkey`, `(regkey)`, `regvalue` or
+/// `(regvalue)`), if it is still there.
+pub fn leftover_backup(ctx: &mut Ctx, kw: &str, args: &[String]) -> Option<String> {
+    let src = key_of(ctx, arg(args, 0));
+    let flag = if matches!(kw, "regkey" | "regvalue") { arg(args, 2) } else { arg(args, 1) };
+    let view = view_of(ctx, flag);
+    let backup = format!("{}_backup", src);
+    let present = if kw.contains("value") {
+        let (k, v) = split_value(&backup);
+        reg::value_exists(&k, &v, view)
+    } else {
+        reg::key_present(&backup, view)
+    };
+    present.then_some(backup)
+}
+
+/// Deletes the value. A value that is not there is not an error; one that is still there after the attempt is
+/// reported.
+fn delete_value_reported(ctx: &Ctx, key: &str, name: &str, view: View) {
+    if let Err(code) = reg::delete_value(key, name, view) {
+        if reg::value_exists(key, name, view) {
+            ctx.log(&format!("ERROR delete registry value \"{}\\{}\" (error {})", key, name, code));
+            let t = format!("The registry value \"{}\\{}\" could not be deleted.", key, name);
+            change_failed(ctx, &t, Some(code), &[key]);
+        }
     }
 }
 
@@ -194,11 +271,7 @@ pub fn minus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let name = ctx.expand(arg(args, 1));
     let view = view_of(ctx, arg(args, 2));
-    if let Err(code) = reg::delete_value(&k, &name, view) {
-        if reg::value_exists(&k, &name, view) {
-            ctx.log(&format!("ERROR delete registry value \"{}\\{}\" (error {})", k, name, code));
-        }
-    }
+    delete_value_reported(ctx, &k, &name, view);
 }
 
 // ----------------------------------------------------- backup / restore
@@ -209,12 +282,14 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     let file = settings_reg(ctx, arg(args, 1));
     let view = view_of(ctx, arg(args, 2));
     let backup = format!("{}_backup", src);
-    copy_key(ctx, &src, &backup, false, view);
+    if !copy_key(ctx, &src, &backup, false, view) {
+        not_saved(ctx, "registry key", &src);
+        return;
+    }
     delete_key(ctx, &src, false, view);
     import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: format!("{}\\", src), file, view });
-    ctx.after_prog.push(Prog::ClearRegKey { key: src.clone(), view });
-    ctx.after_prog.push(Prog::LtrRegKey { src: backup, tgt: src.clone(), mv: true, view });
+    ctx.after_prog.push(Prog::RestoreRegKey { key: src.clone(), backup, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: true, view });
     ctx.after_prog.push(Prog::CleanParents { key: src, view });
 }
@@ -226,7 +301,10 @@ pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 2));
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
-    copy_value(ctx, &src, &backup, false, view);
+    if !copy_value(ctx, &src, &backup, false, view) {
+        not_saved(ctx, "registry value", &src);
+        return;
+    }
     import_or_warn(ctx, &file, view);
     ctx.after_prog.push(Prog::RegExport { key: src.clone(), file, view });
     ctx.after_prog.push(Prog::MinusRegValue { key: k.clone(), name: v, view });
@@ -240,9 +318,11 @@ pub fn pregkeyp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let view = view_of(ctx, arg(args, 1));
     let backup = format!("{}_backup", src);
-    copy_key(ctx, &src, &backup, false, view);
-    ctx.after_prog.push(Prog::ClearRegKey { key: src.clone(), view });
-    ctx.after_prog.push(Prog::LtrRegKey { src: backup, tgt: src.clone(), mv: true, view });
+    if !copy_key(ctx, &src, &backup, false, view) {
+        not_saved(ctx, "registry key", &src);
+        return;
+    }
+    ctx.after_prog.push(Prog::RestoreRegKey { key: src.clone(), backup, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: true, view });
     ctx.after_prog.push(Prog::CleanParents { key: src, view });
 }
@@ -253,7 +333,10 @@ pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 1));
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
-    copy_value(ctx, &src, &backup, false, view);
+    if !copy_value(ctx, &src, &backup, false, view) {
+        not_saved(ctx, "registry value", &src);
+        return;
+    }
     ctx.after_prog.push(Prog::MinusRegValue { key: k.clone(), name: v, view });
     ctx.after_prog.push(Prog::LtrRegValue { src: backup, tgt: src, mv: true, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: k.clone(), if_empty: true, view });
@@ -265,16 +348,11 @@ pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
     match p {
         Prog::RegExport { key, file, view } => export_to(ctx, key, file, *view),
         Prog::MinusRegKey { key, if_empty, view } => delete_key(ctx, key, *if_empty, *view),
-        Prog::ClearRegKey { key, view } => clear_key(ctx, key, *view),
-        Prog::MinusRegValue { key, name, view } => {
-            if let Err(code) = reg::delete_value(key, name, *view) {
-                if reg::value_exists(key, name, *view) {
-                    ctx.log(&format!("ERROR delete registry value \"{}\\{}\" (error {})", key, name, code));
-                }
-            }
+        Prog::RestoreRegKey { key, backup, view } => restore_key(ctx, key, backup, *view),
+        Prog::MinusRegValue { key, name, view } => delete_value_reported(ctx, key, name, *view),
+        Prog::LtrRegValue { src, tgt, mv, view } => {
+            copy_value(ctx, src, tgt, *mv, *view);
         }
-        Prog::LtrRegKey { src, tgt, mv, view } => copy_key(ctx, src, tgt, *mv, *view),
-        Prog::LtrRegValue { src, tgt, mv, view } => copy_value(ctx, src, tgt, *mv, *view),
         Prog::CleanParents { key, view } => reg::delete_empty_parents(key, *view),
         _ => {}
     }
