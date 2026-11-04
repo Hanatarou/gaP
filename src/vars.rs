@@ -252,6 +252,7 @@ impl Ctx {
             let end = from + b + crypto::MARK.len();
             let token = s[a..end].to_string();
             let plain = self.decrypt_token(&token);
+            self.hide_in_log(&plain);
             s.replace_range(a..end, &plain);
             pos = a + plain.len();
         }

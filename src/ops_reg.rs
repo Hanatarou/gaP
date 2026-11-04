@@ -72,6 +72,7 @@ pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool {
     }
     match reg::copy_tree(src, tgt, view) {
         Ok(()) => {
+            ctx.ok(&format!("reg {} key \"{}\" -> \"{}\"", if mv { "move" } else { "copy" }, src, tgt));
             if mv {
                 if let Err(code) = reg::delete_tree(src, view) {
                     let t = format!("The registry key \"{}\" was copied but could not be removed.", src);
@@ -80,7 +81,10 @@ pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool {
             }
             true
         }
-        Err(e) if e.code == ERROR_FILE_NOT_FOUND && e.step == reg::STEP_OPEN_SOURCE => true,
+        Err(e) if e.code == ERROR_FILE_NOT_FOUND && e.step == reg::STEP_OPEN_SOURCE => {
+            ctx.log(&format!("reg copy key \"{}\": it does not exist, nothing to copy", src));
+            true
+        }
         Err(e) => {
             // The step tells which of the calls got the error; a message to the user does not need it.
             ctx.log_err(
@@ -104,12 +108,16 @@ pub fn copy_value(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool
     }
     let (sk, sv) = split_value(src);
     let (tk, tv) = split_value(tgt);
-    let Some(v) = reg::read_value(&sk, &sv, view) else { return true };
+    let Some(v) = reg::read_value(&sk, &sv, view) else {
+        ctx.log(&format!("reg copy value \"{}\": it does not exist, nothing to copy", src));
+        return true;
+    };
     if let Err(code) = reg::write_value(&tk, &tv, v.kind, &v.data, view) {
         let t = format!("The registry value \"{}\" could not be copied to \"{}\".", src, tgt);
         change_failed(ctx, &t, Some(code), &[&sk, &tk]);
         return false;
     }
+    ctx.ok(&format!("reg {} value \"{}\" -> \"{}\"", if mv { "move" } else { "copy" }, src, tgt));
     if mv {
         if let Err(code) = reg::delete_value(&sk, &sv, view) {
             let t = format!("The registry value \"{}\" was copied but could not be removed.", src);
@@ -155,6 +163,8 @@ pub fn plus_regkey(ctx: &mut Ctx, args: &[String]) {
     let view = view_of(ctx, arg(args, 1));
     if let Err(code) = reg::create_key(&k, view) {
         change_failed(ctx, &format!("The registry key \"{}\" could not be created.", k), Some(code), &[&k]);
+    } else {
+        ctx.ok(&format!("reg create key \"{}\"", k));
     }
 }
 
@@ -173,6 +183,8 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
             if let Err(code) = reg::write_value(&key, &name, t, &bytes, view) {
                 let text = format!("The registry value \"{}\\{}\" could not be written.", key, name);
                 change_failed(ctx, &text, Some(code), &[&key]);
+            } else {
+                ctx.ok(&format!("reg write value \"{}\\{}\"", key, name));
             }
         }
         None => ctx.msg(&format!("The value \"{}\" can't be converted to the type \"{}\".", data, kind)),
@@ -191,10 +203,13 @@ pub fn minus_regkey(ctx: &mut Ctx, args: &[String]) {
 pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
     let st = if if_empty { reg::key_state(key, view) } else { 1 };
     if st > 0 && (!if_empty || st == 2) {
-        if let Err(code) = reg::delete_tree(key, view) {
-            if reg::key_exists(key, view) {
-                ctx.log(&format!("ERROR delete registry key \"{}\" (error {})", key, code));
-                change_failed(ctx, &format!("The registry key \"{}\" could not be deleted.", key), Some(code), &[key]);
+        match reg::delete_tree(key, view) {
+            Ok(()) => ctx.ok(&format!("reg delete key \"{}\"", key)),
+            Err(code) => {
+                if reg::key_exists(key, view) {
+                    ctx.err(&format!("delete registry key \"{}\" (error {})", key, code));
+                    change_failed(ctx, &format!("The registry key \"{}\" could not be deleted.", key), Some(code), &[key]);
+                }
             }
         }
     }
@@ -204,9 +219,12 @@ pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
 /// state (see `reg::clear_tree`). A failure is reported and `false` is returned.
 fn clear_key(ctx: &Ctx, key: &str, view: View) -> bool {
     match reg::clear_tree(key, view) {
-        Ok(()) => true,
+        Ok(()) => {
+            ctx.ok(&format!("reg clear key \"{}\"", key));
+            true
+        }
         Err(code) => {
-            ctx.log(&format!("ERROR clear registry key \"{}\" (error {})", key, code));
+            ctx.err(&format!("clear registry key \"{}\" (error {})", key, code));
             change_failed(ctx, &format!("The registry key \"{}\" could not be emptied.", key), Some(code), &[key]);
             false
         }
@@ -220,11 +238,12 @@ fn clear_key(ctx: &Ctx, key: &str, view: View) -> bool {
 pub fn restore_key(ctx: &Ctx, key: &str, backup: &str, view: View) {
     if !reg::key_present(backup, view) {
         // Nothing was saved (the key did not exist before the run): only what the application made is removed.
+        ctx.log(&format!("reg restore \"{}\": nothing was saved, only what the application made is removed", key));
         clear_key(ctx, key, view);
         return;
     }
     if let Err(code) = reg::readable(backup, view) {
-        ctx.log(&format!("ERROR open registry key \"{}\" (error {})", backup, code));
+        ctx.err(&format!("open registry key \"{}\" (error {})", backup, code));
         let t = format!(
             "The saved registry key \"{}\" can't be read, so \"{}\" was left as it is and nothing was removed.",
             backup, key
@@ -258,11 +277,14 @@ pub fn leftover_backup(ctx: &mut Ctx, kw: &str, args: &[String]) -> Option<Strin
 /// Deletes the value. A value that is not there is not an error; one that is still there after the attempt is
 /// reported.
 fn delete_value_reported(ctx: &Ctx, key: &str, name: &str, view: View) {
-    if let Err(code) = reg::delete_value(key, name, view) {
-        if reg::value_exists(key, name, view) {
-            ctx.log(&format!("ERROR delete registry value \"{}\\{}\" (error {})", key, name, code));
-            let t = format!("The registry value \"{}\\{}\" could not be deleted.", key, name);
-            change_failed(ctx, &t, Some(code), &[key]);
+    match reg::delete_value(key, name, view) {
+        Ok(()) => ctx.ok(&format!("reg delete value \"{}\\{}\"", key, name)),
+        Err(code) => {
+            if reg::value_exists(key, name, view) {
+                ctx.err(&format!("delete registry value \"{}\\{}\" (error {})", key, name, code));
+                let t = format!("The registry value \"{}\\{}\" could not be deleted.", key, name);
+                change_failed(ctx, &t, Some(code), &[key]);
+            }
         }
     }
 }
@@ -346,12 +368,31 @@ pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
 /// Runs an automatic registry task (AFTER queue).
 pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
     match p {
-        Prog::RegExport { key, file, view } => export_to(ctx, key, file, *view),
+        Prog::RegExport { key, file, view } => {
+            let note = " The registry was left as it is and the original data stays in the \"_backup\" item.";
+            export_to(ctx, key, file, *view, note);
+        }
         Prog::MinusRegKey { key, if_empty, view } => delete_key(ctx, key, *if_empty, *view),
-        Prog::RestoreRegKey { key, backup, view } => restore_key(ctx, key, backup, *view),
-        Prog::MinusRegValue { key, name, view } => delete_value_reported(ctx, key, name, *view),
+        Prog::RestoreRegKey { key, backup, view } => {
+            if is_unsaved(ctx, key) {
+                ctx.warn(&format!("reg restore \"{}\": skipped, its export failed", key));
+            } else {
+                restore_key(ctx, key, backup, *view);
+            }
+        }
+        Prog::MinusRegValue { key, name, view } => {
+            if is_unsaved(ctx, &format!("{}\\{}", key, name)) {
+                ctx.warn(&format!("reg delete value \"{}\\{}\": skipped, its export failed", key, name));
+            } else {
+                delete_value_reported(ctx, key, name, *view);
+            }
+        }
         Prog::LtrRegValue { src, tgt, mv, view } => {
-            copy_value(ctx, src, tgt, *mv, *view);
+            if is_unsaved(ctx, tgt) {
+                ctx.warn(&format!("reg restore \"{}\": skipped, its export failed", tgt));
+            } else {
+                copy_value(ctx, src, tgt, *mv, *view);
+            }
         }
         Prog::CleanParents { key, view } => reg::delete_empty_parents(key, *view),
         _ => {}
@@ -374,7 +415,12 @@ pub fn import_file(file: &str, view: View) -> bool {
 }
 
 fn import_or_warn(ctx: &Ctx, file: &str, view: View) {
-    if !import_file(file, view) {
+    if !util::is_file(file) {
+        ctx.log(&format!("reg import \"{}\": the file does not exist, nothing to import", file));
+    } else if import_file(file, view) {
+        ctx.ok(&format!("reg import \"{}\"", file));
+    } else {
+        ctx.err(&format!("reg import \"{}\" failed", file));
         change_failed(ctx, &format!("The registry file \"{}\" could not be imported.", file), None, &[]);
     }
 }
@@ -429,34 +475,68 @@ fn filter_single_value(file: &str, key: &str, name: &str) {
     let _ = util::write_text(file, &out, enc);
 }
 
-/// Core of `regexport` with resolved paths. `key_or_value` ends in
-/// '\' when it is a key; otherwise it is "Key\Value".
-pub fn export_to(_ctx: &Ctx, key_or_value: &str, file: &str, view: View) {
+/// The key or value as `unsaved` names it: the text without the backslash that marks a key, in lower case.
+fn unsaved_id(spec: &str) -> String {
+    spec.trim_end_matches('\\').to_lowercase()
+}
+
+/// `spec` is a key or value whose export failed in this run, so its AFTER steps must leave it as it is.
+fn is_unsaved(ctx: &Ctx, spec: &str) -> bool {
+    let id = unsaved_id(spec);
+    ctx.unsaved.borrow().contains(&id)
+}
+
+/// Core of `regexport` with resolved paths. `key_or_value` ends in '\' when it is a key; otherwise it is
+/// "Key\Value". The registry is exported to a file beside the target and that file takes the place of the target
+/// only when `reg.exe` succeeded, so a failure never costs the file that was there. `false` = the export failed
+/// (it was reported, with `note` after the message); a key or value that does not exist is not a failure.
+pub fn export_to(ctx: &Ctx, key_or_value: &str, file: &str, view: View, note: &str) -> bool {
     let is_key = key_or_value.ends_with('\\');
     let spec = key_or_value.trim_end_matches('\\');
     let (key, value) = if is_key { (spec.to_string(), String::new()) } else { split_value(spec) };
     let exists = if is_key { reg::key_exists(&key, view) } else { reg::value_exists(&key, &value, view) };
     if !exists {
-        return;
-    }
-    if util::exists(file) {
-        util::delete_files(file);
+        ctx.log(&format!("reg export \"{}\": it does not exist, nothing to export", spec));
+        return true;
     }
     let par = util::parent_dir(file);
     if !par.is_empty() {
         let _ = std::fs::create_dir_all(&par);
     }
-    sys::run_hidden_wait(&reg_exe(), &["export", &key, file, "/y", view.reg_exe_flag()]);
-    if !is_key {
-        filter_single_value(file, &key, &value);
+    let tmp = format!("{}.gap_tmp.reg", file);
+    let _ = std::fs::remove_file(&tmp);
+    let mut done = sys::run_hidden_wait(&reg_exe(), &["export", &key, &tmp, "/y", view.reg_exe_flag()]) && util::is_file(&tmp);
+    if done && !is_key {
+        filter_single_value(&tmp, &key, &value);
     }
+    if done {
+        if let Err(e) = util::move_over(&tmp, file) {
+            ctx.log_err(&format!("replace \"{}\" with the exported file", file), &e);
+            done = false;
+        }
+    }
+    if !done {
+        let _ = std::fs::remove_file(&tmp);
+        ctx.err(&format!("reg export \"{}\" -> \"{}\" failed", spec, file));
+        ctx.unsaved.borrow_mut().push(unsaved_id(spec));
+        ctx.msg(&format!(
+            "The registry {} \"{}\" could not be exported to \"{}\". The previous file was kept.{}",
+            if is_key { "key" } else { "value" },
+            spec,
+            file,
+            note
+        ));
+        return false;
+    }
+    ctx.ok(&format!("reg export \"{}\" -> \"{}\"", spec, file));
+    true
 }
 
 pub fn regexport_kw(ctx: &mut Ctx, args: &[String]) {
     let file = settings_reg(ctx, arg(args, 1));
     let spec = ctx.expand_ex(arg(args, 0), true);
     let view = view_of(ctx, arg(args, 2));
-    export_to(ctx, &spec, &file, view);
+    export_to(ctx, &spec, &file, view, "");
 }
 
 pub fn regimport_kw(ctx: &mut Ctx, args: &[String]) {

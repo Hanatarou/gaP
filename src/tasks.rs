@@ -1,7 +1,7 @@
 //! Engine of the BEFORE / AFTER sections: .ini reading, x86/x64 filter,
 //! keyword normalization, section/parameter validation and execution.
 
-use crate::ctx::{exit_code, Ctx, Prog, Section, TaskKind, EXIT_BACKUP};
+use crate::ctx::{error_count, exit_code, Ctx, Prog, Section, TaskKind, EXIT_BACKUP};
 use crate::{clean, ops_fs, ops_misc, ops_reg, util};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -104,9 +104,9 @@ fn normalize(raw_key: &str, os_arch: &str) -> Option<String> {
 /// `BeforeSecIni` / `AfterSecIni`.
 pub fn init_section(ctx: &mut Ctx, sec: Section) -> Vec<TaskKind> {
     let pairs = ctx.ini.section_pairs(sec.name()).unwrap_or_default();
-    ctx.log(&format!("[{} Section Tasks List - Raw]", sec.name()));
+    ctx.raw(&format!("[{} Section Tasks List - Raw]", sec.name()));
     for (k, v) in &pairs {
-        ctx.log(&format!("{}|{}", k, v));
+        ctx.raw(&format!("{}|{}", k, v));
     }
     let mut out = Vec::new();
     for (k, v) in pairs {
@@ -118,10 +118,10 @@ pub fn init_section(ctx: &mut Ctx, sec: Section) -> Vec<TaskKind> {
             }
         }
     }
-    ctx.log(&format!("[{} Section Tasks List - Initialized]", sec.name()));
+    ctx.raw(&format!("[{} Section Tasks List - Initialized]", sec.name()));
     for t in &out {
         if let TaskKind::User { kw, raw_val, .. } = t {
-            ctx.log(&format!("{}|{}", kw, raw_val));
+            ctx.raw(&format!("{}|{}", kw, raw_val));
         }
     }
     out
@@ -136,9 +136,19 @@ fn run_prog(ctx: &mut Ctx, p: &Prog) {
     }
 }
 
-/// Runs a user item (validating section and number of parameters).
+/// Runs a user item and says in the debug log how it went.
 fn exec_user(ctx: &mut Ctx, sec: Section, kw: &str, args: &[String], raw_key: &str) {
-    ctx.log(&format!("EXEC [{}] {} :: {:?}", sec.name(), kw, args));
+    let before = error_count();
+    ctx.log(&format!("{} :: {:?}", kw, args));
+    exec_user_item(ctx, sec, kw, args, raw_key);
+    match error_count() - before {
+        0 => ctx.ok(&format!("{} done", kw)),
+        n => ctx.err(&format!("{} finished with {} error(s)", kw, n)),
+    }
+}
+
+/// Runs a user item (validating section and number of parameters).
+fn exec_user_item(ctx: &mut Ctx, sec: Section, kw: &str, args: &[String], raw_key: &str) {
     let Some(spec) = SPECS.iter().find(|s| s.name == kw) else {
         ctx.msg(&format!("Unknown keyword \"{}\" in the \"{}\" section was ignored.", raw_key, sec.name()));
         return;
@@ -229,19 +239,22 @@ fn run_all_prog(ctx: &mut Ctx, args: &[String]) {
 /// `BeforeSecProc`.
 pub fn process_before(ctx: &mut Ctx) {
     let mut tasks = std::mem::take(&mut ctx.before);
+    ctx.phase.set("BEFORE");
     for pass in 0..2 {
         if pass == 1 {
             stop_on_leftover_backups(ctx, &tasks);
         }
-        for t in tasks.iter_mut() {
+        for (i, t) in tasks.iter_mut().enumerate() {
             let now = matches!(&*t, TaskKind::User { kw, .. } if (pass == 0) == RUN_FIRST_BEFORE.contains(&kw.as_str()));
             if now {
                 if let TaskKind::User { kw, args, raw_key, .. } = std::mem::replace(t, TaskKind::Done) {
+                    ctx.item.set(i + 1);
                     exec_user(ctx, Section::Before, &kw, &args, &raw_key);
                 }
             }
         }
     }
+    ctx.item.set(0);
     ctx.log("[Before Section Tasks List - Processed]");
     log_state(ctx);
 }
@@ -265,7 +278,7 @@ fn stop_on_leftover_backups(ctx: &mut Ctx, tasks: &[TaskKind]) {
         return;
     }
     for b in &found {
-        ctx.log(&format!("ERROR leftover backup \"{}\"", b));
+        ctx.err(&format!("leftover backup \"{}\"", b));
     }
     ctx.msg(&format!(
         "An earlier run did not finish and left its original data in:\n\n{}\n\nRestore or delete {} before running again. Nothing was changed.",
@@ -279,14 +292,17 @@ fn stop_on_leftover_backups(ctx: &mut Ctx, tasks: &[TaskKind]) {
 /// `AfterSecProc`.
 pub fn process_after(ctx: &mut Ctx) {
     let mut tasks = std::mem::take(&mut ctx.after);
-    for t in tasks.iter_mut() {
+    ctx.phase.set("AFTER");
+    for (i, t) in tasks.iter_mut().enumerate() {
         let now = matches!(&*t, TaskKind::User { kw, .. } if RUN_FIRST_AFTER.contains(&kw.as_str()));
         if now {
             if let TaskKind::User { kw, args, raw_key, .. } = std::mem::replace(t, TaskKind::Done) {
+                ctx.item.set(i + 1);
                 exec_user(ctx, Section::After, &kw, &args, &raw_key);
             }
         }
     }
+    ctx.item.set(0);
     // With `restore = 1` present, the automatic tasks wait for the keyword
     // (in the original they always ran before, making `restore` useless).
     let mut deferred = false;
@@ -300,11 +316,13 @@ pub fn process_after(ctx: &mut Ctx) {
     if !deferred {
         run_pending_prog(ctx);
     }
-    for t in tasks.iter_mut() {
+    for (i, t) in tasks.iter_mut().enumerate() {
         if let TaskKind::User { kw, args, raw_key, .. } = std::mem::replace(t, TaskKind::Done) {
+            ctx.item.set(i + 1);
             exec_user(ctx, Section::After, &kw, &args, &raw_key);
         }
     }
+    ctx.item.set(0);
     // restore = 1 never reached (e.g., removed by architecture): leave nothing pending.
     if deferred {
         run_pending_prog(ctx);
@@ -325,9 +343,9 @@ fn log_state(ctx: &Ctx) {
     if ctx.debug.is_none() {
         return;
     }
-    ctx.log("[Variables List]");
+    ctx.raw("[Variables List]");
     for (k, v) in &ctx.vars {
-        ctx.log(&format!("{}|{}", k, v));
+        ctx.raw(&format!("{}|{}", k, v));
     }
 }
 

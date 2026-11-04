@@ -108,6 +108,7 @@ fn launcher(ctx: &mut Ctx) {
         tasks::process_after(ctx);
     }
     clean_traces(ctx);
+    ctx::log_end(0);
 }
 
 /// Cleans the registry traces of gaP and of the main application (once it is known).
@@ -130,21 +131,29 @@ fn main_command_line(ctx: &Ctx) -> String {
 
 fn start_main(ctx: &Ctx) {
     let cl = main_command_line(ctx);
-    if let Err(e) = sys::launch(&cl, &ctx.main_workdir, ctx.show_state, false) {
-        // IMPROVEMENT: the original ignored the return value of Run().
-        ctx.msg(&format!(
-            "The main application \"{}\" could not be started (error {}).",
-            ctx.main_app.clone().unwrap_or_default(),
-            e
-        ));
+    match sys::launch(&cl, &ctx.main_workdir, ctx.show_state, false) {
+        Ok(()) => ctx.ok(&format!("launch {} (working folder \"{}\")", cl, ctx.main_workdir)),
+        Err(e) => start_failed(ctx, &cl, e),
     }
+}
+
+fn start_failed(ctx: &Ctx, cl: &str, e: u32) {
+    // IMPROVEMENT: the original ignored the return value of Run().
+    ctx.err(&format!("launch {} failed (error {})", cl, e));
+    ctx.msg(&format!(
+        "The main application \"{}\" could not be started (error {}).",
+        ctx.main_app.clone().unwrap_or_default(),
+        e
+    ));
 }
 
 /// `RunMainAppProc`: starts the main application and waits for it. While it runs, command lines sent by other
 /// instances (`!multiple`) start it again.
 fn run_main_app(ctx: &mut Ctx) {
+    ctx.phase.set("RUN");
     start_main(ctx);
     if !ctx.wait_main {
+        ctx.log("the main application is not waited for (!nowait)");
         return;
     }
     loop {
@@ -168,9 +177,12 @@ fn run_main_app(ctx: &mut Ctx) {
         }
     }
     if !ctx.waitprocess.is_empty() {
+        ctx.phase.set("WAIT");
+        ctx.log(&format!("waiting for a window or process \"{}\"", ctx.waitprocess));
         while sys::window_title_exists(&ctx.waitprocess) || sys::process_exists(&ctx.waitprocess) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
+        ctx.ok("nothing matches \"!waitprocess\" any more");
     }
     log_leftovers(ctx);
 }

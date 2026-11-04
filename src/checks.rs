@@ -275,6 +275,17 @@ pub fn main_app_init(ctx: &mut Ctx) {
     };
     let chosen = pick(ctx, &segs[index]);
     let app_arch = segment_arch(index);
+    // The architecture the line declares for the file must be the one of the file. A program that is not a PE
+    // (a script, a shortcut) has none, and is left alone.
+    if let Some(found) = util::pe_arch(&sys::io_path(app_arch, &chosen)) {
+        if found != app_arch {
+            ctx.msg(&format!(
+                "The main application \"{}\" is set as {} in the \"application\" line, but the file is {}.",
+                chosen, app_arch, found
+            ));
+            exit_code(EXIT_CONFIG);
+        }
+    }
     let exepath = chosen.rfind('\\').map(|i| chosen[..i].to_string()).unwrap_or_default();
     ctx.app_arch = app_arch;
     ctx.add_var("APPEXE", &chosen);
@@ -370,17 +381,35 @@ pub fn debug_log_init(ctx: &mut Ctx) {
         let _ = std::fs::create_dir_all(&d);
         format!("{}\\{}_{}_{}.log", d, ctx.exe_name, std::process::id(), stamp)
     };
-    let Some(lg) = crate::ctx::Logger::open(&path) else { return };
+    let Some(lg) = crate::ctx::Logger::open(&path) else {
+        ctx.msg(&format!("The debug log could not be created in \"{}\". Click OK to continue without it.", path));
+        return;
+    };
     let pad = |s: String| format!("{:<57}#", s);
     lg.write("######################gaP Log Header######################");
     lg.write(&pad(format!(
         "#  Date(DD/MM/YYYY - HH:MM:SS): {:02}/{:02}/{:04} - {:02}:{:02}:{:02}",
         t.day, t.month, t.year, t.hour, t.min, t.sec
     )));
-    lg.write(&pad(format!("#  gaP Version: {}", crate::ctx::PROGRAM_VERSION)));
+    lg.write(&pad(format!(
+        "#  gaP Version: {} ({}, PID {})",
+        crate::ctx::PROGRAM_VERSION,
+        sys::gap_arch(),
+        std::process::id()
+    )));
     lg.write(&pad(format!("#  Host OS: {}", sys::os_name())));
     lg.write(&pad(format!("#  Host Architecture: {}", ctx.os_arch)));
+    lg.write(&pad(format!("#  Ini: {}", ctx.ini_path)));
+    lg.write(&pad(format!("#  Application: {} ({})", ctx.main_app.clone().unwrap_or_default(), ctx.app_arch)));
+    lg.write(&pad(format!("#  Command line: {}", ctx.cmd_raw)));
+    lg.write(&pad(format!(
+        "#  Administrator: {}   Read only drive: {}",
+        if sys::is_admin() { "yes" } else { "no" },
+        if ctx.is_readonly { "yes" } else { "no" }
+    )));
     lg.write("######################gaP Log Header######################");
+    lg.write("");
+    lg.write("Columns: time, seconds since the previous line, phase, .ini item, INFO | OK | WARN | ERR | MSG, text");
     lg.write("");
     lg.write("[Shell Folders]");
     for (n, v) in ctx.shell_all() {

@@ -130,8 +130,9 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
             doc.set(s, &key, &val);
         }
     }
-    if let Err(e) = doc.save(&file) {
-        ctx.log_err(&format!("write \"{}\"", file), &e);
+    match doc.save(&file) {
+        Ok(()) => ctx.ok(&format!("ini write \"{}\"", file)),
+        Err(e) => ctx.log_err(&format!("write \"{}\"", file), &e),
     }
 }
 
@@ -152,6 +153,7 @@ pub fn killprocess(ctx: &mut Ctx, args: &[String]) {
     let p = ctx.expand(arg(args, 0));
     if !p.is_empty() {
         sys::kill_by_prefix(&p);
+        ctx.log(&format!("kill processes whose name starts with \"{}\"", p));
     }
 }
 
@@ -201,10 +203,17 @@ pub fn regdll(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     let exe = sys::system32_for(ctx.app_arch, "regsvr32.exe");
-    if eq_ic(&flag, "register") {
-        sys::run_hidden_wait(&exe, &["/S", &file]);
+    let ok = if eq_ic(&flag, "register") {
+        sys::run_hidden_wait(&exe, &["/S", &file])
     } else if eq_ic(&flag, "unregister") {
-        sys::run_hidden_wait(&exe, &["/U", "/S", &file]);
+        sys::run_hidden_wait(&exe, &["/U", "/S", &file])
+    } else {
+        return;
+    };
+    if ok {
+        ctx.ok(&format!("regsvr32 {} \"{}\"", flag, file));
+    } else {
+        ctx.err(&format!("regsvr32 {} \"{}\" failed", flag, file));
     }
 }
 
@@ -226,8 +235,12 @@ pub fn grun(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     let cmd = if cl.is_empty() { format!("\"{}\"", app) } else { format!("\"{}\" {}", app, cl) };
-    if let Err(e) = sys::launch(&cmd, &wd, 5, eq_ic(&wait, "wait")) {
-        ctx.msg(&format!("\"{}\" could not be started (error {}).", app, e));
+    match sys::launch(&cmd, &wd, 5, eq_ic(&wait, "wait")) {
+        Ok(()) => ctx.ok(&format!("run {}{}", cmd, if eq_ic(&wait, "wait") { " (waited)" } else { "" })),
+        Err(e) => {
+            ctx.err(&format!("run {} failed (error {})", cmd, e));
+            ctx.msg(&format!("\"{}\" could not be started (error {}).", app, e));
+        }
     }
 }
 

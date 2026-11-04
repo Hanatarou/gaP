@@ -73,7 +73,7 @@ fn recover_replaced(ctx: &Ctx, tgt: &str) {
     let par = if par.len() == 2 { format!("{}\\", par) } else { par };
     for old in util::list_dir(&par, &format!("{}{}*", name, TRASH), Kind::Dirs) {
         if is_trash_name(&name, &util::file_name(&old)) && !util::remove_dir_recursive(&old) {
-            ctx.log(&format!("ERROR delete leftover folder \"{}\"", old));
+            ctx.err(&format!("delete leftover folder \"{}\"", old));
         }
     }
     let aside = format!("{}{}", tgt, ASIDE);
@@ -88,6 +88,21 @@ fn recover_replaced(ctx: &Ctx, tgt: &str) {
 /// Core of `->dir`/`<-dir` with already resolved paths. What fails is written to the debug log. `false` = the
 /// operation failed; nothing to do (no source) is not a failure.
 pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool {
+    let what = format!("dir {} \"{}\" -> \"{}\"{}", if mv { "move" } else { "copy" }, src, tgt, if ow { " (overwrite)" } else { "" });
+    if !util::is_dir(src) {
+        ctx.log(&format!("{}: the source does not exist, nothing to do", what));
+        return true;
+    }
+    let ok = transfer_dir_run(ctx, src, tgt, mv, ow);
+    if ok {
+        ctx.ok(&what);
+    } else {
+        ctx.err(&format!("{} failed", what));
+    }
+    ok
+}
+
+fn transfer_dir_run(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool {
     if eq_ic(&norm_cmp(src), &norm_cmp(tgt)) || !util::is_dir(src) {
         return true;
     }
@@ -133,7 +148,7 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool
                     let trash = free_name(&format!("{}{}", tgt, TRASH));
                     let old = if std::fs::rename(&aside, &trash).is_ok() { trash } else { aside };
                     if !util::remove_dir_recursive(&old) {
-                        ctx.log(&format!("ERROR delete the previous content \"{}\"", old));
+                        ctx.err(&format!("delete the previous content \"{}\"", old));
                     }
                     true
                 }
@@ -168,7 +183,9 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool
 
 /// Core of `->file`/`<-file` with resolved FILE paths.
 pub fn transfer_file(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool {
+    let what = format!("file {} \"{}\" -> \"{}\"{}", if mv { "move" } else { "copy" }, src, tgt, if ow { " (overwrite)" } else { "" });
     if eq_ic(src, tgt) || !util::is_file(src) {
+        ctx.log(&format!("{}: the source does not exist, nothing to do", what));
         return true;
     }
     let r = if mv { util::move_file(src, tgt, ow) } else { util::copy_file(src, tgt, ow) };
@@ -176,6 +193,7 @@ pub fn transfer_file(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> boo
         ctx.log_err(&format!("{} \"{}\" to \"{}\"", if mv { "move" } else { "copy" }, src, tgt), &e);
         return false;
     }
+    ctx.ok(&what);
     true
 }
 
@@ -334,8 +352,9 @@ pub fn leftover_backup(ctx: &mut Ctx, kw: &str, args: &[String]) -> Option<Strin
 pub fn plus_dir(ctx: &mut Ctx, args: &[String]) {
     let d = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     // creating a folder that exists is not an error
-    if let Err(e) = std::fs::create_dir_all(&d) {
-        ctx.log_err(&format!("create folder \"{}\"", d), &e);
+    match std::fs::create_dir_all(&d) {
+        Ok(()) => ctx.ok(&format!("dir create \"{}\"", d)),
+        Err(e) => ctx.log_err(&format!("create folder \"{}\"", d), &e),
     }
 }
 
@@ -357,8 +376,9 @@ pub fn plus_file(ctx: &mut Ctx, args: &[String]) {
             let _ = std::fs::remove_file(&f); // recreates (mode "erase")
         }
         let enc = if util::ansi_to_string(&util::string_to_ansi(&text)) == text { Enc::Ansi } else { Enc::Utf8 };
-        if let Err(e) = util::write_text(&f, &text, enc) {
-            ctx.log_err(&format!("create file \"{}\"", f), &e);
+        match util::write_text(&f, &text, enc) {
+            Ok(()) => ctx.ok(&format!("file create \"{}\"", f)),
+            Err(e) => ctx.log_err(&format!("create file \"{}\"", f), &e),
         }
     }
 }
@@ -375,8 +395,11 @@ pub fn minus_dir(ctx: &mut Ctx, args: &[String]) {
         }
         if eq_ic(&flag, "ifempty") {
             util::remove_dir_if_empty(&m);
-        } else if !util::remove_dir_recursive(&m) {
-            ctx.log(&format!("ERROR delete folder \"{}\"", m));
+            ctx.log(&format!("dir delete \"{}\" (only if empty)", m));
+        } else if util::remove_dir_recursive(&m) {
+            ctx.ok(&format!("dir delete \"{}\"", m));
+        } else {
+            ctx.err(&format!("delete folder \"{}\"", m));
         }
     }
 }
@@ -385,7 +408,9 @@ pub fn minus_file(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
     let failed = util::delete_files(&f);
     if failed > 0 {
-        ctx.log(&format!("ERROR delete {} file(s) of \"{}\"", failed, f));
+        ctx.err(&format!("delete {} file(s) of \"{}\"", failed, f));
+    } else {
+        ctx.ok(&format!("file delete \"{}\"", f));
     }
 }
 
@@ -679,8 +704,9 @@ pub fn replace(ctx: &mut Ctx, args: &[String]) {
     if let Some((text, enc)) = util::read_text(&f) {
         let new = util::replace_all_ic(&text, &find, &rep);
         if new != text {
-            if let Err(e) = util::write_text(&f, &new, enc) {
-                ctx.log_err(&format!("write \"{}\"", f), &e);
+            match util::write_text(&f, &new, enc) {
+                Ok(()) => ctx.ok(&format!("replace text in \"{}\"", f)),
+                Err(e) => ctx.log_err(&format!("write \"{}\"", f), &e),
             }
         }
     }
@@ -698,8 +724,9 @@ pub fn replaceline(ctx: &mut Ctx, args: &[String]) {
         if let Some(i) = lines.iter().position(|(l, _)| util::contains_ic(l, &find)) {
             lines[i].0 = rep;
             let out: String = lines.iter().map(|(l, e)| format!("{}{}", l, e)).collect();
-            if let Err(e) = util::write_text(&f, &out, enc) {
-                ctx.log_err(&format!("write \"{}\"", f), &e);
+            match util::write_text(&f, &out, enc) {
+                Ok(()) => ctx.ok(&format!("replace line in \"{}\"", f)),
+                Err(e) => ctx.log_err(&format!("write \"{}\"", f), &e),
             }
         }
     }
@@ -729,8 +756,9 @@ pub fn regmerge(ctx: &mut Ctx, args: &[String]) {
         out.push_str(&l);
         out.push_str(if e.is_empty() { "\r\n" } else { &e });
     }
-    if let Err(e) = util::write_text(&f1, &out, e1) {
-        ctx.log_err(&format!("write \"{}\"", f1), &e);
+    match util::write_text(&f1, &out, e1) {
+        Ok(()) => ctx.ok(&format!("regmerge \"{}\" + \"{}\"", f1, f2)),
+        Err(e) => ctx.log_err(&format!("write \"{}\"", f1), &e),
     }
 }
 

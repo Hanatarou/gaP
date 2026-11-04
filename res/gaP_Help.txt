@@ -230,6 +230,11 @@ second segment (if available).
 application: the architecture of the main application is the one of the
 segment that gaP launched. On a 32bit OS it is always the first one.
 * For an application that exists only as x64 use NULL as the first segment.
+* gaP reads the executable and checks that it is for the architecture of the
+segment it was set in. An x64 executable in the first segment, or an x86 one
+in the second, is an error: gaP shows a message and exits (exit code 2)
+before doing anything. A file that is not an executable (a script, a
+shortcut) is not checked.
 * Both gaP builds (x86 and x64) behave the same way with the same .ini. What
 depends on the architecture of the main application, and not on the one of
 gaP, is: the "System32" folder in paths, the "regdll" and "batch" keywords
@@ -562,7 +567,11 @@ Notes:
 1. backup regkey "HKCU\Software\RegKey" to "HKCU\Software\RegKey_backup"
 2. import file "settings.reg" to the registry
 * Operations on AFTER section:
-1. export regkey "HKCU\Software\RegKey" to "settings.reg"
+1. export regkey "HKCU\Software\RegKey" to "settings.reg". The export is
+   made to a temporary file that takes the place of "settings.reg" only
+   when it worked; if it fails, the previous "settings.reg" is kept, gaP
+   shows an error, steps 2 to 5 are skipped and the original data stays
+   in "HKCU\Software\RegKey_backup"
 2. check that "HKCU\Software\RegKey_backup" can be read; if it can't,
    "HKCU\Software\RegKey" is left as it is and nothing is removed
 3. delete the content of regkey "HKCU\Software\RegKey"
@@ -605,7 +614,11 @@ Notes:
    "HKCU\Software\Key\Value_backup"
 2. import file "settings.reg" to the registry
 * Operations on AFTER section:
-1. export reg value "HKCU\Software\Key\Value" to "settings.reg"
+1. export reg value "HKCU\Software\Key\Value" to "settings.reg". The export
+   is made to a temporary file that takes the place of "settings.reg" only
+   when it worked; if it fails, the previous "settings.reg" is kept, gaP
+   shows an error, steps 2 and 3 are skipped and the original data stays
+   in "HKCU\Software\Key\Value_backup"
 2. delete reg value "HKCU\Software\Key\Value"
 3. restore reg value "HKCU\Software\Key\Value_backup" to
    "HKCU\Software\Key\Value"

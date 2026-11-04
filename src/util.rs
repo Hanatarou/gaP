@@ -14,8 +14,9 @@ use windows_sys::Win32::Globalization::{
     CompareStringOrdinal, FindStringOrdinal, MultiByteToWideChar, WideCharToMultiByte, CSTR_EQUAL, FIND_FROMSTART,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    GetFileAttributesW, MoveFileExW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY, INVALID_FILE_ATTRIBUTES,
-    MOVEFILE_COPY_ALLOWED, MOVEFILE_REPLACE_EXISTING,
+    GetFileAttributesW, MoveFileExW, ReplaceFileW, SetFileAttributesW, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_HIDDEN,
+    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_SYSTEM, INVALID_FILE_ATTRIBUTES, MOVEFILE_COPY_ALLOWED, MOVEFILE_REPLACE_EXISTING, REPLACEFILE_IGNORE_ACL_ERRORS,
+    REPLACEFILE_IGNORE_MERGE_ERRORS,
 };
 
 // ---------------------------------------------------------------- strings
@@ -474,8 +475,68 @@ pub fn copy_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
     }
     if Path::new(dst).exists() {
         clear_readonly(dst);
+        // The old file is replaced in one step, so an interrupted copy never leaves half a file in its place.
+        let tmp = tmp_name(dst);
+        match fs::copy(src, &tmp) {
+            Ok(_) => {
+                let attrs = file_attrs(&tmp);
+                replace_with(&tmp, dst)?;
+                // A copy leaves the destination with the attributes of the source.
+                if let Some(a) = attrs {
+                    let cur = file_attrs(dst).unwrap_or(0);
+                    let new = (cur & !COPIED_ATTRS) | (a & COPIED_ATTRS);
+                    unsafe { SetFileAttributesW(w(dst).as_ptr(), if new == 0 { FILE_ATTRIBUTE_NORMAL } else { new }) };
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp);
+                // Only "the folder takes no new files" falls back to writing over the file; anything else (a full
+                // disk, for one) is reported with the old file untouched.
+                if e.kind() != io::ErrorKind::PermissionDenied {
+                    return Err(e);
+                }
+            }
+        }
     }
     fs::copy(src, dst).map(|_| ())
+}
+
+/// The attributes a copy carries from the source to the destination.
+const COPIED_ATTRS: u32 =
+    FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE;
+
+fn file_attrs(p: &str) -> Option<u32> {
+    let a = unsafe { GetFileAttributesW(w(p).as_ptr()) };
+    (a != INVALID_FILE_ATTRIBUTES).then_some(a)
+}
+
+/// Name of the file a write goes to before it takes the place of `path`.
+pub fn tmp_name(path: &str) -> String {
+    format!("{}.gap_tmp", path)
+}
+
+/// `tmp` takes the place of the existing file `dst` in one step (`ReplaceFileW` keeps the attributes and the
+/// permissions of `dst`). When it fails `tmp` is deleted and `dst` is untouched.
+pub fn replace_with(tmp: &str, dst: &str) -> io::Result<()> {
+    let flags = REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS;
+    let ok = unsafe { ReplaceFileW(w(dst).as_ptr(), w(tmp).as_ptr(), std::ptr::null(), flags, std::ptr::null(), std::ptr::null()) };
+    if ok != 0 {
+        return Ok(());
+    }
+    let e = io::Error::last_os_error();
+    let _ = fs::remove_file(tmp);
+    Err(e)
+}
+
+/// `tmp` becomes `dst`, replacing it if it exists.
+pub fn move_over(tmp: &str, dst: &str) -> io::Result<()> {
+    if Path::new(dst).exists() {
+        clear_readonly(dst);
+        replace_with(tmp, dst)
+    } else {
+        fs::rename(tmp, dst)
+    }
 }
 
 /// `FileMove(…, 8|1)`. With `overwrite` the destination is replaced in one step by the system (it is never
@@ -608,7 +669,24 @@ pub fn write_text(path: &str, s: &str, enc: Enc) -> io::Result<()> {
             let _ = fs::create_dir_all(par);
         }
     }
-    fs::write(path, encode_string(s, enc))
+    let data = encode_string(s, enc);
+    if !Path::new(path).exists() {
+        return fs::write(path, data);
+    }
+    // The new content is written beside the file and takes its place in one step: an interruption (full disk,
+    // power loss, the process killed) never leaves a truncated file.
+    let tmp = tmp_name(path);
+    match fs::write(&tmp, &data) {
+        Ok(()) => replace_with(&tmp, path),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                fs::write(path, data) // the folder takes no new files but the file can be written
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 /// Splits into lines preserving the terminator of each one.
@@ -636,6 +714,32 @@ pub fn split_lines_keep(s: &str) -> Vec<(String, String)> {
     out
 }
 
+// ------------------------------------------------------------ executable type
+
+/// Architecture of a PE file, from the `Machine` field of its header: `"x86"` or `"x64"`. `None` when the file
+/// is not a PE, cannot be read, or is for another architecture.
+pub fn pe_arch(path: &str) -> Option<&'static str> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(path).ok()?;
+    let mut dos = [0u8; 64];
+    f.read_exact(&mut dos).ok()?;
+    if &dos[..2] != b"MZ" {
+        return None;
+    }
+    let at = u32::from_le_bytes([dos[0x3C], dos[0x3D], dos[0x3E], dos[0x3F]]);
+    f.seek(SeekFrom::Start(u64::from(at))).ok()?;
+    let mut h = [0u8; 6];
+    f.read_exact(&mut h).ok()?;
+    if &h[..4] != b"PE\0\0" {
+        return None;
+    }
+    match u16::from_le_bytes([h[4], h[5]]) {
+        0x014C => Some("x86"),
+        0x8664 => Some("x64"),
+        _ => None,
+    }
+}
+
 // -------------------------------------------------------------------- dates
 
 #[derive(Clone, Copy, Debug)]
@@ -646,6 +750,7 @@ pub struct LocalTime {
     pub hour: u16,
     pub min: u16,
     pub sec: u16,
+    pub ms: u16,
 }
 
 pub fn local_now() -> LocalTime {
@@ -660,6 +765,7 @@ pub fn local_now() -> LocalTime {
             hour: st.wHour,
             min: st.wMinute,
             sec: st.wSecond,
+            ms: st.wMilliseconds,
         }
     }
 }
@@ -824,6 +930,50 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn write_text_replaces_in_one_step_and_leaves_no_temp_file() {
+        let t = Scratch::new("write_text");
+        let f = t.path("a.ini");
+        write_text(&f, "old", Enc::Utf8).unwrap();
+        write_text(&f, "new", Enc::Utf8).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert!(!Path::new(&tmp_name(&f)).exists());
+    }
+
+    #[test]
+    fn copy_file_overwrite_replaces_and_leaves_no_temp_file() {
+        let t = Scratch::new("copy_over");
+        std::fs::write(t.path("src.txt"), "new").unwrap();
+        std::fs::write(t.path("dst.txt"), "old").unwrap();
+        copy_file(&t.path("src.txt"), &t.path("dst.txt"), true).unwrap();
+        assert_eq!(std::fs::read_to_string(t.path("dst.txt")).unwrap(), "new");
+        assert!(!Path::new(&tmp_name(&t.path("dst.txt"))).exists());
+    }
+
+    #[test]
+    fn copy_file_overwrite_carries_the_attributes_of_the_source() {
+        let t = Scratch::new("copy_attrs");
+        std::fs::write(t.path("src.txt"), "new").unwrap();
+        std::fs::write(t.path("dst.txt"), "old").unwrap();
+        unsafe { SetFileAttributesW(w(&t.path("src.txt")).as_ptr(), FILE_ATTRIBUTE_HIDDEN) };
+        copy_file(&t.path("src.txt"), &t.path("dst.txt"), true).unwrap();
+        let a = file_attrs(&t.path("dst.txt")).unwrap();
+        assert_ne!(a & FILE_ATTRIBUTE_HIDDEN, 0);
+        unsafe { SetFileAttributesW(w(&t.path("dst.txt")).as_ptr(), FILE_ATTRIBUTE_NORMAL) };
+        unsafe { SetFileAttributesW(w(&t.path("src.txt")).as_ptr(), FILE_ATTRIBUTE_NORMAL) };
+    }
+
+    #[test]
+    fn pe_arch_reads_the_header() {
+        let exe = std::env::current_exe().unwrap().to_string_lossy().to_string();
+        let want = if cfg!(target_pointer_width = "64") { "x64" } else { "x86" };
+        assert_eq!(pe_arch(&exe), Some(want));
+        let t = Scratch::new("pe_arch");
+        std::fs::write(t.path("a.bat"), "@echo off").unwrap();
+        assert_eq!(pe_arch(&t.path("a.bat")), None);
+        assert_eq!(pe_arch(&t.path("missing.exe")), None);
     }
 
     #[test]

@@ -2,6 +2,9 @@
 //! AutoIt script — and types of the BEFORE/AFTER task queues.
 
 use std::cell::{Cell, OnceCell, RefCell};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use crate::ini::IniDoc;
 use crate::{crypto, ipc, reg, sys, ui, util};
@@ -101,18 +104,41 @@ impl Section {
     }
 }
 
+/// Where the debug log is, how many errors and warnings it got and when the run started: the line that ends the
+/// log is written by whoever ends the program (see `log_end`), which has no `Ctx`.
+static LOG_PATH: Mutex<Option<String>> = Mutex::new(None);
+static ERRORS: AtomicU32 = AtomicU32::new(0);
+static WARNINGS: AtomicU32 = AtomicU32::new(0);
+static ENDED: AtomicBool = AtomicBool::new(false);
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// Errors the log got so far (an item compares the number before and after it ran).
+pub fn error_count() -> u32 {
+    ERRORS.load(Ordering::Relaxed)
+}
+
 /// The debug log. The file stays open for the whole run and every line is one write, so nothing is lost when the
 /// program ends with `process::exit`.
+///
+/// An event is one line: `time +seconds-since-the-previous-line PHASE #item LEVEL text`. The level says how it
+/// went: `INFO` what happens, `OK` an operation that worked, `WARN` something odd that did not stop the item,
+/// `ERR` an operation that failed, `MSG` a message the user was shown.
 pub struct Logger {
     file: RefCell<std::fs::File>,
+    last: Cell<Instant>,
 }
 
 impl Logger {
     pub fn open(path: &str) -> Option<Logger> {
         let f = std::fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
-        Some(Logger { file: RefCell::new(f) })
+        if let Ok(mut p) = LOG_PATH.lock() {
+            *p = Some(path.to_string());
+        }
+        let _ = STARTED.set(Instant::now());
+        Some(Logger { file: RefCell::new(f), last: Cell::new(Instant::now()) })
     }
 
+    /// A line as it is (the header and the lists).
     pub fn write(&self, text: &str) {
         use std::io::Write;
         let mut line = String::with_capacity(text.len() + 1);
@@ -120,6 +146,49 @@ impl Logger {
         line.push('\n');
         let _ = self.file.borrow_mut().write_all(line.as_bytes());
     }
+
+    pub fn event(&self, phase: &str, item: usize, level: &str, text: &str) {
+        match level {
+            "ERR" => ERRORS.fetch_add(1, Ordering::Relaxed),
+            "WARN" => WARNINGS.fetch_add(1, Ordering::Relaxed),
+            _ => 0,
+        };
+        let now = Instant::now();
+        let gap = now.duration_since(self.last.replace(now)).as_secs_f64();
+        let t = util::local_now();
+        let item = if item == 0 { String::new() } else { format!("#{}", item) };
+        self.write(&format!(
+            "{:02}:{:02}:{:02}.{:03} +{:<7.3} {:<6} {:<4} {:<4} {}",
+            t.hour,
+            t.min,
+            t.sec,
+            t.ms,
+            gap,
+            phase,
+            item,
+            level,
+            text
+        ));
+    }
+}
+
+/// Writes the line that ends the debug log, once (when there is a log).
+pub fn log_end(code: i32) {
+    if ENDED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let Some(path) = LOG_PATH.lock().ok().and_then(|p| p.clone()) else { return };
+    let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(path) else { return };
+    use std::io::Write;
+    let secs = STARTED.get().map_or(0.0, |s| s.elapsed().as_secs_f64());
+    let _ = writeln!(
+        f,
+        "\nEND  exit={}  errors={}  warnings={}  elapsed={:.1}s",
+        code,
+        ERRORS.load(Ordering::Relaxed),
+        WARNINGS.load(Ordering::Relaxed),
+        secs
+    );
 }
 
 pub struct Ctx {
@@ -143,6 +212,14 @@ pub struct Ctx {
     pub run_after: bool,
     pub wait_main: bool,
     pub debug: Option<Logger>,
+    /// What the debug log says the program is doing: INIT, BEFORE, RUN, WAIT or AFTER, and the number of the
+    /// `.ini` item that is running (0 = none).
+    pub phase: Cell<&'static str>,
+    pub item: Cell<usize>,
+    /// Registry keys and values whose export to the `.reg` failed: their AFTER steps leave them as they are.
+    pub unsaved: RefCell<Vec<String>>,
+    /// Texts that came out of encrypted tokens: the debug log never shows them.
+    secrets: RefCell<Vec<String>>,
 
     pub vars: Vec<(String, String)>,
     /// Value of each entry of `SHELL_FOLDERS`; `None` until it is used for the first time.
@@ -195,6 +272,10 @@ impl Ctx {
             run_after: true,
             wait_main: true,
             debug: None,
+            phase: Cell::new("INIT"),
+            item: Cell::new(0),
+            unsaved: RefCell::new(Vec::new()),
+            secrets: RefCell::new(Vec::new()),
             vars: Vec::new(),
             shell: vec![None; SHELL_FOLDERS.len()],
             main_app: None,
@@ -273,19 +354,62 @@ impl Ctx {
 
     pub fn msg(&self, text: &str) {
         if !self.quiet.get() {
+            self.emit("MSG", &text.replace("\r\n", " | ").replace('\n', " | "));
             ui::info(&self.title, text);
         }
     }
 
-    pub fn log(&self, text: &str) {
+    /// From now on the debug log shows `***` where `secret` (the text of a decrypted token) would be.
+    pub fn hide_in_log(&self, secret: &str) {
+        if !secret.is_empty() && self.debug.is_some() {
+            self.secrets.borrow_mut().push(secret.to_string());
+        }
+    }
+
+    fn scrub(&self, text: &str) -> String {
+        let mut t = text.to_string();
+        for s in self.secrets.borrow().iter() {
+            t = t.replace(s.as_str(), "***");
+        }
+        t
+    }
+
+    fn emit(&self, level: &str, text: &str) {
         if let Some(l) = &self.debug {
-            l.write(text);
+            l.event(self.phase.get(), self.item.get(), level, &self.scrub(text));
+        }
+    }
+
+    /// Debug log: what happens.
+    pub fn log(&self, text: &str) {
+        self.emit("INFO", text);
+    }
+
+    /// Debug log: an operation that worked.
+    pub fn ok(&self, text: &str) {
+        self.emit("OK", text);
+    }
+
+    /// Debug log: something odd that did not stop the item.
+    pub fn warn(&self, text: &str) {
+        self.emit("WARN", text);
+    }
+
+    /// Debug log: an operation that failed.
+    pub fn err(&self, text: &str) {
+        self.emit("ERR", text);
+    }
+
+    /// Debug log: a line as it is, without the columns (the lists of items and variables).
+    pub fn raw(&self, text: &str) {
+        if let Some(l) = &self.debug {
+            l.write(&self.scrub(text));
         }
     }
 
     /// Writes a failure that the program does not show to the debug log.
     pub fn log_err(&self, what: &str, err: &dyn std::fmt::Display) {
-        self.log(&format!("ERROR {}: {}", what, err));
+        self.err(&format!("{}: {}", what, err));
     }
 
     /// A path as the main application sees it (see `util::rewrite_system32`).
@@ -315,5 +439,6 @@ pub fn exit_now() -> ! {
 
 /// Quits without additional cleanup with the given exit code.
 pub fn exit_code(code: i32) -> ! {
+    log_end(code);
     std::process::exit(code)
 }
