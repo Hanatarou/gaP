@@ -5,29 +5,6 @@
 use crate::ctx::{exit_code, Ctx, EXIT_CANCELLED, EXIT_CONFIG, FUNC_MACROS, SHELL_FOLDERS};
 use crate::{checks, crypto, sys, ui, util};
 
-/// The smallest macro of the text: the first `}` that closes a `{`, and the nearest `{` before it, so there is no
-/// other macro inside. Returns the positions (in bytes) of both. A delimiter right after a '<' is escaped, and a `}`
-/// with no `{` before it is just text. `{`, `}` and `<` are ASCII, so scanning the bytes is enough.
-fn innermost(s: &str) -> Option<(usize, usize)> {
-    let b = s.as_bytes();
-    let mut open = None;
-    for i in 0..b.len() {
-        if i > 0 && b[i - 1] == b'<' {
-            continue;
-        }
-        match b[i] {
-            b'{' => open = Some(i),
-            b'}' => {
-                if let Some(o) = open {
-                    return Some((o, i));
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 pub fn unescape(s: &str) -> String {
     s.replace("<{", "{").replace("<}", "}")
 }
@@ -136,27 +113,56 @@ fn restore(s: &str) -> String {
     o
 }
 
-/// Replaces `{{NAME}}` (the value with doubled backslashes) and `{NAME}`: the smallest macro first, again and again, so
-/// a macro can be inside the name of another one (`{PREFIX_{LANGCODE}}`). The text is never read again beyond that:
-/// a value goes in with its braces neutralized, so each step takes one macro out and none comes in, and the loop
-/// always ends. An undefined name is reported by the caller. `Err` = (the text up to the problem, the name).
+/// Replaces `{{NAME}}` (the value with doubled backslashes) and `{NAME}`: the smallest macro first, so a macro can be
+/// inside the name of another one (`{PREFIX_{LANGCODE}}`). The text is read once, from left to right: each unescaped `{`
+/// is remembered, and an unescaped `}` closes the last one. A value goes in with its braces neutralized, so nothing
+/// that comes from a value is ever read as a macro. An undefined name is reported by the caller.
+/// `Err` = (the text up to the problem, the name).
 fn expand_macros(s: &str, mut lookup: impl FnMut(&str) -> Option<String>) -> Result<String, (String, String)> {
-    let mut s = protect(s);
-    while let Some((a, b)) = innermost(&s) {
-        let t = s.as_bytes();
+    let text = protect(s);
+    let input = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(input.len());
+    let mut opens: Vec<usize> = Vec::new();
+    let mut i = 0;
+    while i < input.len() {
+        let c = input[i];
+        i += 1;
+        // `{`, `}` and `<` are ASCII, so scanning the bytes is enough; a delimiter right after a '<' is escaped
+        if out.last() == Some(&b'<') || (c != b'{' && c != b'}') {
+            out.push(c);
+            continue;
+        }
+        if c == b'{' {
+            opens.push(out.len());
+            out.push(c);
+            continue;
+        }
+        // a `}` with no `{` before it is just text
+        let Some(a) = opens.pop() else {
+            out.push(c);
+            continue;
+        };
+        let b = out.len();
         // `{{NAME}}`: the macro is wrapped by one more pair of unescaped braces
-        let doubled = a > 0 && t.get(b + 1) == Some(&b'}') && t[a - 1] == b'{' && (a == 1 || t[a - 2] != b'<');
-        let (from, to) = if doubled { (a - 1, b + 2) } else { (a, b + 1) };
-        let name = restore(&s[a + 1..b]);
-        match lookup(&name) {
-            Some(v) => {
-                let v = neutralize(&v);
-                s.replace_range(from..to, &if doubled { v.replace('\\', "\\\\") } else { v });
-            }
-            None => return Err((restore(&s), name)),
+        let doubled = a > 0 && input.get(i) == Some(&b'}') && out[a - 1] == b'{' && (a == 1 || out[a - 2] != b'<');
+        let name = restore(std::str::from_utf8(&out[a + 1..b]).unwrap_or(""));
+        let Some(v) = lookup(&name) else {
+            out.push(c);
+            out.extend_from_slice(&input[i..]);
+            return Err((restore(std::str::from_utf8(&out).unwrap_or("")), name));
+        };
+        let v = neutralize(&v);
+        if doubled {
+            opens.pop();
+            i += 1;
+            out.truncate(a - 1);
+            out.extend_from_slice(v.replace('\\', "\\\\").as_bytes());
+        } else {
+            out.truncate(a);
+            out.extend_from_slice(v.as_bytes());
         }
     }
-    Ok(restore(&s))
+    Ok(restore(std::str::from_utf8(&out).unwrap_or("")))
 }
 
 impl Ctx {
@@ -165,6 +171,12 @@ impl Ctx {
         let t = util::local_now();
         let h = t.hour;
         let h12 = if h.is_multiple_of(12) { 12 } else { h % 12 };
+        // While a check expands the arguments of the items before they run (`quiet`), nothing is asked of the user: the
+        // item asks when it runs, and the check leaves it out.
+        if self.quiet.get() && matches!(name, "USERDIR" | "USERFILE" | "USERTEXT") {
+            self.skipped.set(true);
+            return String::new();
+        }
         match name {
             "LANGCODE" => sys::os_lang().to_string(),
             "USERDIR" => ui::select_folder("Please, select a directory for {USERDIR} macro:").unwrap_or_default(),
@@ -225,6 +237,11 @@ impl Ctx {
             if let Some(t) = crypto::decrypt(token, &pw) {
                 return t;
             }
+        }
+        if self.quiet.get() {
+            // see `func_macro`
+            self.skipped.set(true);
+            return String::new();
         }
         for _ in 0..3 {
             let Some(pw) = ui::input_box("Please, enter the password to decrypt data:", "Password:", true) else {
@@ -309,14 +326,15 @@ mod tests {
 
     #[test]
     fn smallest_macro() {
-        assert_eq!(innermost("a {X} b"), Some((2, 4)));
-        assert_eq!(innermost("{A{B}}"), Some((2, 4)));
-        assert_eq!(innermost("} {A}"), Some((2, 4))); // a `}` with no `{` is text
-        assert_eq!(innermost("a < {X} b"), Some((4, 6)));
-        assert_eq!(innermost("{open"), None);
-        assert_eq!(innermost("a <{X<} b"), None);
+        let ex = |s: &str| expand_macros(s, |n| Some(format!("[{n}]"))).unwrap();
+        assert_eq!(ex("a {X} b"), "a [X] b");
+        assert_eq!(ex("{A{B}}"), "[A[B]]"); // the inner macro first: {A[B]} is then looked up
+        assert_eq!(ex("} {A}"), "} [A]"); // a `}` with no `{` is text
+        assert_eq!(ex("a < {X} b"), "a < [X] b");
+        assert_eq!(ex("{open"), "{open");
+        assert_eq!(ex("a <{X<} b"), "a {X} b");
         // only "<{" and "<}" escape; the old "<<" is not special any more
-        assert_eq!(innermost("a <<{X} b"), None);
+        assert_eq!(ex("a <<{X} b"), "a <{X} b");
         assert_eq!(unescape("<{x<}<<"), "{x}<<");
     }
 

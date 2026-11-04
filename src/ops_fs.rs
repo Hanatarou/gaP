@@ -185,7 +185,7 @@ fn transfer_dir_run(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool
 pub fn transfer_file(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool {
     let what = format!("file {} \"{}\" -> \"{}\"{}", if mv { "move" } else { "copy" }, src, tgt, if ow { " (overwrite)" } else { "" });
     if eq_ic(src, tgt) || !util::is_file(src) {
-        ctx.log(&format!("{}: the source does not exist, nothing to do", what));
+        ctx.log(&format!("{}: nothing to do (no source file, or source and target are the same)", what));
         return true;
     }
     let r = if mv { util::move_file(src, tgt, ow) } else { util::copy_file(src, tgt, ow) };
@@ -277,6 +277,16 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
     transfer_file(ctx, &src, &tgt, mv, ow);
 }
 
+/// The move of a file to its `_backup` failed. When the file is still there it was not touched, and what the move
+/// left at `backup` (a copy it could not finish, or a complete one whose original it could not remove) is of no use:
+/// it is deleted, so that the next run does not stop for a `_backup` that holds nothing.
+fn drop_failed_backup(ctx: &Ctx, src: &str, backup: &str) {
+    if util::is_file(src) && util::exists(backup) {
+        let failed = util::delete_files(backup);
+        ctx.log(&format!("the unfinished backup \"{}\" was deleted{}", backup, if failed > 0 { " (it could not)" } else { "" }));
+    }
+}
+
 /// An item whose original data could not be saved is skipped: nothing was changed.
 fn not_saved(ctx: &Ctx, what: &str, src: &str) {
     ctx.msg(&format!("The original {} \"{}\" could not be saved, so this item was skipped and nothing was changed.", what, src));
@@ -308,6 +318,7 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
     };
     let backup = format!("{}_backup", src);
     if !transfer_file(ctx, &src, &backup, true, true) {
+        drop_failed_backup(ctx, &src, &backup);
         not_saved(ctx, "file", &src);
         return;
     }
@@ -332,6 +343,7 @@ pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = full(ctx, arg(args, 0));
     let backup = format!("{}_backup", src);
     if !transfer_file(ctx, &src, &backup, true, true) {
+        drop_failed_backup(ctx, &src, &backup);
         not_saved(ctx, "file", &src);
         return;
     }
@@ -698,7 +710,7 @@ pub fn replace(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
     let find = ctx.expand(arg(args, 1));
     let rep = ctx.expand(arg(args, 2));
-    if !util::is_file(&f) {
+    if !util::is_file(&f) || ctx.refuse_big(&f) {
         return;
     }
     if let Some((text, enc)) = util::read_text(&f) {
@@ -716,7 +728,7 @@ pub fn replaceline(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
     let find = ctx.expand(arg(args, 1));
     let rep = ctx.expand(arg(args, 2));
-    if !util::is_file(&f) || find.is_empty() {
+    if !util::is_file(&f) || find.is_empty() || ctx.refuse_big(&f) {
         return;
     }
     if let Some((text, enc)) = util::read_text(&f) {
@@ -736,7 +748,7 @@ pub fn replaceline(ctx: &mut Ctx, args: &[String]) {
 pub fn regmerge(ctx: &mut Ctx, args: &[String]) {
     let f1 = full(ctx, arg(args, 0));
     let f2 = full(ctx, arg(args, 1));
-    if !util::is_file(&f1) || !util::is_file(&f2) {
+    if !util::is_file(&f1) || !util::is_file(&f2) || ctx.refuse_big(&f1) || ctx.refuse_big(&f2) {
         return;
     }
     let (Some((t1, e1)), Some((t2, _))) = (util::read_text(&f1), util::read_text(&f2)) else { return };

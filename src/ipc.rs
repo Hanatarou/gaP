@@ -152,7 +152,8 @@ fn serve(pipe: usize, event: usize, tx: Sender<String>) {
                     unsafe { SetEvent(event as HANDLE) };
                 }
             }
-        } else {
+        } else if unsafe { GetLastError() } != ERROR_NO_DATA {
+            // ERROR_NO_DATA is a client that left before it was served: it says nothing about the pipe.
             failures += 1;
             if failures > 50 {
                 return;
@@ -191,7 +192,8 @@ pub fn send(name: &str, text: &str) -> bool {
     }
     // The pipe can be busy with another instance, or not exist yet (the first instance creates it right after
     // it creates its mutex): try again for a few seconds.
-    for _ in 0..40 {
+    let mut waited = 0u32; // ms; the pipe may take a while to exist on a slow machine
+    while waited < 10_000 {
         unsafe {
             let h = CreateFileW(wname.as_ptr(), GENERIC_WRITE, 0, null(), OPEN_EXISTING, 0, null_mut());
             if h != INVALID_HANDLE_VALUE {
@@ -206,8 +208,12 @@ pub fn send(name: &str, text: &str) -> bool {
             match GetLastError() {
                 ERROR_PIPE_BUSY => {
                     WaitNamedPipeW(wname.as_ptr(), 500);
+                    waited += 500;
                 }
-                ERROR_FILE_NOT_FOUND => std::thread::sleep(std::time::Duration::from_millis(50)),
+                ERROR_FILE_NOT_FOUND => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    waited += 50;
+                }
                 _ => return false,
             }
         }

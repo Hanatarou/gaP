@@ -117,12 +117,17 @@ pub fn error_count() -> u32 {
     ERRORS.load(Ordering::Relaxed)
 }
 
+/// Warnings and messages shown to the user so far.
+pub fn warning_count() -> u32 {
+    WARNINGS.load(Ordering::Relaxed)
+}
+
 /// The debug log. The file stays open for the whole run and every line is one write, so nothing is lost when the
 /// program ends with `process::exit`.
 ///
 /// An event is one line: `time +seconds-since-the-previous-line PHASE #item LEVEL text`. The level says how it
 /// went: `INFO` what happens, `OK` an operation that worked, `WARN` something odd that did not stop the item,
-/// `ERR` an operation that failed, `MSG` a message the user was shown.
+/// `ERR` an operation that failed, `MSG` a message the user was shown (it counts as a warning).
 pub struct Logger {
     file: RefCell<std::fs::File>,
     last: Cell<Instant>,
@@ -150,7 +155,7 @@ impl Logger {
     pub fn event(&self, phase: &str, item: usize, level: &str, text: &str) {
         match level {
             "ERR" => ERRORS.fetch_add(1, Ordering::Relaxed),
-            "WARN" => WARNINGS.fetch_add(1, Ordering::Relaxed),
+            "WARN" | "MSG" => WARNINGS.fetch_add(1, Ordering::Relaxed),
             _ => 0,
         };
         let now = Instant::now();
@@ -218,6 +223,9 @@ pub struct Ctx {
     pub item: Cell<usize>,
     /// Registry keys and values whose export to the `.reg` failed: their AFTER steps leave them as they are.
     pub unsaved: RefCell<Vec<String>>,
+    /// Set when an expansion made with `quiet` on needed to ask the user (a folder, a file, a text, a password):
+    /// the item cannot be checked before it runs.
+    pub skipped: Cell<bool>,
     /// Texts that came out of encrypted tokens: the debug log never shows them.
     secrets: RefCell<Vec<String>>,
 
@@ -275,6 +283,7 @@ impl Ctx {
             phase: Cell::new("INIT"),
             item: Cell::new(0),
             unsaved: RefCell::new(Vec::new()),
+            skipped: Cell::new(false),
             secrets: RefCell::new(Vec::new()),
             vars: Vec::new(),
             shell: vec![None; SHELL_FOLDERS.len()],
@@ -361,7 +370,7 @@ impl Ctx {
 
     /// From now on the debug log shows `***` where `secret` (the text of a decrypted token) would be.
     pub fn hide_in_log(&self, secret: &str) {
-        if !secret.is_empty() && self.debug.is_some() {
+        if !secret.is_empty() {
             self.secrets.borrow_mut().push(secret.to_string());
         }
     }
@@ -410,6 +419,15 @@ impl Ctx {
     /// Writes a failure that the program does not show to the debug log.
     pub fn log_err(&self, what: &str, err: &dyn std::fmt::Display) {
         self.err(&format!("{}: {}", what, err));
+    }
+
+    /// `true` (and a message) when the text file `f` is too big to be read into memory.
+    pub fn refuse_big(&self, f: &str) -> bool {
+        let big = util::too_big(f);
+        if big {
+            self.msg(&format!("\"{}\" is bigger than {} MB and was left as it is.", f, util::MAX_TEXT_FILE >> 20));
+        }
+        big
     }
 
     /// A path as the main application sees it (see `util::rewrite_system32`).

@@ -480,14 +480,17 @@ pub fn copy_file(src: &str, dst: &str, overwrite: bool) -> io::Result<()> {
         match fs::copy(src, &tmp) {
             Ok(_) => {
                 let attrs = file_attrs(&tmp);
-                replace_with(&tmp, dst)?;
-                // A copy leaves the destination with the attributes of the source.
-                if let Some(a) = attrs {
-                    let cur = file_attrs(dst).unwrap_or(0);
-                    let new = (cur & !COPIED_ATTRS) | (a & COPIED_ATTRS);
-                    unsafe { SetFileAttributesW(w(dst).as_ptr(), if new == 0 { FILE_ATTRIBUTE_NORMAL } else { new }) };
+                // When the file cannot be replaced (a program keeps it open and does not share it for deletion) it is
+                // written over, as before.
+                if replace_with(&tmp, dst).is_ok() {
+                    // A copy leaves the destination with the attributes of the source.
+                    if let Some(a) = attrs {
+                        let cur = file_attrs(dst).unwrap_or(0);
+                        let new = (cur & !COPIED_ATTRS) | (a & COPIED_ATTRS);
+                        unsafe { SetFileAttributesW(w(dst).as_ptr(), if new == 0 { FILE_ATTRIBUTE_NORMAL } else { new }) };
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
             Err(e) => {
                 let _ = fs::remove_file(&tmp);
@@ -509,6 +512,13 @@ const COPIED_ATTRS: u32 =
 fn file_attrs(p: &str) -> Option<u32> {
     let a = unsafe { GetFileAttributesW(w(p).as_ptr()) };
     (a != INVALID_FILE_ATTRIBUTES).then_some(a)
+}
+
+/// A text file bigger than this is not read into memory to be edited (it would take twice that as UTF-16).
+pub const MAX_TEXT_FILE: u64 = 64 * 1024 * 1024;
+
+pub fn too_big(path: &str) -> bool {
+    fs::metadata(path).map(|m| m.len() > MAX_TEXT_FILE).unwrap_or(false)
 }
 
 /// Name of the file a write goes to before it takes the place of `path`.
@@ -677,7 +687,8 @@ pub fn write_text(path: &str, s: &str, enc: Enc) -> io::Result<()> {
     // power loss, the process killed) never leaves a truncated file.
     let tmp = tmp_name(path);
     match fs::write(&tmp, &data) {
-        Ok(()) => replace_with(&tmp, path),
+        // Written over when the file cannot be replaced (a program keeps it open and does not share it for deletion).
+        Ok(()) => replace_with(&tmp, path).or_else(|_| fs::write(path, &data)),
         Err(e) => {
             let _ = fs::remove_file(&tmp);
             if e.kind() == io::ErrorKind::PermissionDenied {

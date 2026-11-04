@@ -1,7 +1,7 @@
 //! Engine of the BEFORE / AFTER sections: .ini reading, x86/x64 filter,
 //! keyword normalization, section/parameter validation and execution.
 
-use crate::ctx::{error_count, exit_code, Ctx, Prog, Section, TaskKind, EXIT_BACKUP};
+use crate::ctx::{error_count, exit_code, warning_count, Ctx, Prog, Section, TaskKind, EXIT_BACKUP};
 use crate::{clean, ops_fs, ops_misc, ops_reg, util};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -128,7 +128,7 @@ pub fn init_section(ctx: &mut Ctx, sec: Section) -> Vec<TaskKind> {
 }
 
 fn run_prog(ctx: &mut Ctx, p: &Prog) {
-    ctx.log(&format!("PROG {:?}", p));
+    ctx.log(&describe(p));
     match p {
         Prog::LtrDir { .. } | Prog::LtrFile { .. } => ops_fs::run_prog_fs(ctx, p),
         Prog::SymlinkRemove { link, is_dir } => ops_misc::remove_symlink(link, *is_dir),
@@ -136,14 +136,53 @@ fn run_prog(ctx: &mut Ctx, p: &Prog) {
     }
 }
 
+fn view_name(v: &crate::reg::View) -> String {
+    format!("{:?}", v).to_lowercase()
+}
+
+/// An automatic task as the debug log shows it.
+fn describe(p: &Prog) -> String {
+    let how = |mv: &bool, ow: &bool| format!("{}{}", if *mv { "move" } else { "copy" }, if *ow { " (overwrite)" } else { "" });
+    match p {
+        Prog::LtrDir { src, tgt, mv, ow } => format!("PROG dir {} \"{}\" -> \"{}\"", how(mv, ow), src, tgt),
+        Prog::LtrFile { src, tgt, mv, ow } => format!("PROG file {} \"{}\" -> \"{}\"", how(mv, ow), src, tgt),
+        Prog::RegExport { key, file, view } => {
+            format!("PROG reg export \"{}\" -> \"{}\" ({})", key.trim_end_matches('\\'), file, view_name(view))
+        }
+        Prog::MinusRegKey { key, if_empty, view } => format!(
+            "PROG reg delete key \"{}\"{} ({})",
+            key,
+            if *if_empty { " only if empty" } else { "" },
+            view_name(view)
+        ),
+        Prog::RestoreRegKey { key, backup, view } => {
+            format!("PROG reg restore \"{}\" -> \"{}\" ({})", backup, key, view_name(view))
+        }
+        Prog::MinusRegValue { key, name, view } => format!("PROG reg delete value \"{}\\{}\" ({})", key, name, view_name(view)),
+        Prog::LtrRegValue { src, tgt, mv, view } => format!(
+            "PROG reg {} value \"{}\" -> \"{}\" ({})",
+            if *mv { "move" } else { "copy" },
+            src,
+            tgt,
+            view_name(view)
+        ),
+        Prog::SymlinkRemove { link, .. } => format!("PROG remove link \"{}\"", link),
+        Prog::CleanParents { key, view } => format!("PROG reg delete the empty parents of \"{}\" ({})", key, view_name(view)),
+    }
+}
+
 /// Runs a user item and says in the debug log how it went.
 fn exec_user(ctx: &mut Ctx, sec: Section, kw: &str, args: &[String], raw_key: &str) {
-    let before = error_count();
-    ctx.log(&format!("{} :: {:?}", kw, args));
+    let (errors, warnings) = (error_count(), warning_count());
+    ctx.log(&format!("{} = {}", kw, args.join(" :: ")));
     exec_user_item(ctx, sec, kw, args, raw_key);
-    match error_count() - before {
-        0 => ctx.ok(&format!("{} done", kw)),
-        n => ctx.err(&format!("{} finished with {} error(s)", kw, n)),
+    let (errors, warnings) = (error_count() - errors, warning_count() - warnings);
+    if errors > 0 {
+        ctx.err(&format!("{} finished with {} error(s) and {} warning(s)", kw, errors, warnings));
+    } else if warnings > 0 {
+        ctx.warn(&format!("{} finished with {} warning(s)", kw, warnings));
+    } else {
+        ctx.ok(&format!("{} done", kw));
     }
 }
 
@@ -264,16 +303,25 @@ pub fn process_before(ctx: &mut Ctx) {
 /// original data of a run that did not end: copying over it would lose it. gaP stops before changing anything.
 fn stop_on_leftover_backups(ctx: &mut Ctx, tasks: &[TaskKind]) {
     let mut found = Vec::new();
+    // The arguments are expanded here before the items run: a message about them is shown once, by the item.
+    ctx.quiet.set(true);
     for t in tasks {
         if let TaskKind::User { kw, args, .. } = t {
+            ctx.skipped.set(false);
             let left = match kw.as_str() {
                 "regkey" | "regvalue" | "pregkeyp" | "pregvaluep" => ops_reg::leftover_backup(ctx, kw, args),
                 "dir" | "file" | "pdirp" | "pfilep" => ops_fs::leftover_backup(ctx, kw, args),
                 _ => None,
             };
-            found.extend(left);
+            // An item that needs the user to say something (a folder, a file, a text, a password) cannot be checked
+            // before it runs: what the check would look at is not what the item will use.
+            if !ctx.skipped.get() {
+                found.extend(left);
+            }
         }
     }
+    ctx.skipped.set(false);
+    ctx.quiet.set(false);
     if found.is_empty() {
         return;
     }
@@ -345,7 +393,8 @@ fn log_state(ctx: &Ctx) {
     }
     ctx.raw("[Variables List]");
     for (k, v) in &ctx.vars {
-        ctx.raw(&format!("{}|{}", k, v));
+        // CR and LF are shown as text so that a value is one line.
+        ctx.raw(&format!("{}|{}", k, v.replace('\r', "\\r").replace('\n', "\\n")));
     }
 }
 

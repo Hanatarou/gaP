@@ -199,8 +199,8 @@ pub fn minus_regkey(ctx: &mut Ctx, args: &[String]) {
 }
 
 /// Deletes the key (`if_empty`: only if it has no values and no subkeys). A key that is not there is not an error;
-/// a key that is still there after the attempt is reported.
-pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
+/// a key that is still there after the attempt is reported and `false` is returned.
+pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) -> bool {
     let st = if if_empty { reg::key_state(key, view) } else { 1 };
     if st > 0 && (!if_empty || st == 2) {
         match reg::delete_tree(key, view) {
@@ -209,10 +209,12 @@ pub fn delete_key(ctx: &Ctx, key: &str, if_empty: bool, view: View) {
                 if reg::key_exists(key, view) {
                     ctx.err(&format!("delete registry key \"{}\" (error {})", key, code));
                     change_failed(ctx, &format!("The registry key \"{}\" could not be deleted.", key), Some(code), &[key]);
+                    return false;
                 }
             }
         }
     }
+    true
 }
 
 /// Empties the key (values and subkeys) and keeps the key itself, so its name is never left in the "being deleted"
@@ -308,9 +310,16 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
         not_saved(ctx, "registry key", &src);
         return;
     }
-    delete_key(ctx, &src, false, view);
-    import_or_warn(ctx, &file, view);
-    ctx.after_prog.push(Prog::RegExport { key: format!("{}\\", src), file, view });
+    // A key that could not be deleted still has the data of the computer: importing over it would mix the portable
+    // settings with it, and exporting it at the end would put the data of the computer in the portable file. So
+    // nothing is imported or exported, and the original is put back at the end.
+    let cleared = delete_key(ctx, &src, false, view);
+    if cleared {
+        import_or_warn(ctx, &file, view);
+        ctx.after_prog.push(Prog::RegExport { key: format!("{}\\", src), file, view });
+    } else {
+        ctx.warn(&format!("regkey \"{}\": the portable settings are neither imported nor saved in this run", src));
+    }
     ctx.after_prog.push(Prog::RestoreRegKey { key: src.clone(), backup, view });
     ctx.after_prog.push(Prog::MinusRegKey { key: src.clone(), if_empty: true, view });
     ctx.after_prog.push(Prog::CleanParents { key: src, view });
@@ -372,7 +381,9 @@ pub fn run_prog_reg(ctx: &Ctx, p: &Prog) {
             let note = " The registry was left as it is and the original data stays in the \"_backup\" item.";
             export_to(ctx, key, file, *view, note);
         }
-        Prog::MinusRegKey { key, if_empty, view } => delete_key(ctx, key, *if_empty, *view),
+        Prog::MinusRegKey { key, if_empty, view } => {
+            delete_key(ctx, key, *if_empty, *view);
+        }
         Prog::RestoreRegKey { key, backup, view } => {
             if is_unsaved(ctx, key) {
                 ctx.warn(&format!("reg restore \"{}\": skipped, its export failed", key));

@@ -186,7 +186,10 @@ pub fn java_full(ctx: &mut Ctx) {
     let req = req.replace('!', "");
     let info = java_info(&[app_view(ctx)]);
     let ok = java_major(&req).map(|m| info.majors.contains(&m)).unwrap_or(false);
-    if !ok {
+    if ok {
+        ctx.ok(&format!("!java {}: found", req));
+    } else {
+        ctx.err(&format!("!java {}: not found", req));
         ctx.msg(&format!("The main application requires Java Runtime Environment version {} to run.", req));
         if exit {
             exit_code(EXIT_REQUIREMENT);
@@ -305,7 +308,7 @@ pub fn workdir_init(ctx: &mut Ctx) {
         ctx.get_var("EXEPATH").unwrap_or("").to_string()
     } else {
         let full = util::path_full(&wd, &ctx.script_dir);
-        if !util::exists(&full) {
+        if !util::is_dir(&full) {
             ctx.msg("The main application working directory path is invalid.");
             exit_code(EXIT_CONFIG);
         }
@@ -333,7 +336,12 @@ fn hand_over(ctx: &Ctx, pipe: &str) -> ! {
 /// The first instance of this executable owns a named mutex and listens on a named pipe; the other instances
 /// find the mutex taken and, depending on `!multiple`, pass their command line through the pipe and leave.
 pub fn multiple_init(ctx: &mut Ctx) {
-    let multiple = auto_num(&general(ctx, "!multiple", "0"));
+    let mut multiple = auto_num(&general(ctx, "!multiple", "0"));
+    if !matches!(multiple, -1..=1) {
+        // NEW (gaP-rs): like "!os", a value that is not valid is said, and the default is used.
+        ctx.msg(&format!("The \"{}\" value of \"!multiple\" isn't valid. Use -1, 0 or 1. The default (0) is used.", multiple));
+        multiple = 0;
+    }
     // The names depend on where the executable is and on what it contains.
     let code = format!("@{}@{}@", crypto::sha1_hex(&util::string_to_ansi(&ctx.script_full)), ctx.file_hash());
     let key = crypto::sha1_hex(code.as_bytes());
@@ -411,6 +419,11 @@ pub fn debug_log_init(ctx: &mut Ctx) {
     lg.write("");
     lg.write("Columns: time, seconds since the previous line, phase, .ini item, INFO | OK | WARN | ERR | MSG, text");
     lg.write("");
+    lg.write("[General]");
+    for (k, v) in ctx.ini.section_pairs("GENERAL").unwrap_or_default() {
+        lg.write(&format!("{}|{}", k, v));
+    }
+    lg.write("");
     lg.write("[Shell Folders]");
     for (n, v) in ctx.shell_all() {
         lg.write(&format!("{}|{}", n, v));
@@ -423,6 +436,9 @@ pub fn debug_log_init(ctx: &mut Ctx) {
 
 pub fn admin_init(ctx: &mut Ctx) {
     let v = general(ctx, "!admin", "");
+    if !v.is_empty() {
+        ctx.log(&format!("!admin {}: gaP {} with administrator rights", v, if sys::is_admin() { "runs" } else { "does not run" }));
+    }
     if v.is_empty() || sys::is_admin() {
         return;
     }
@@ -515,7 +531,10 @@ pub fn dotnet_init(ctx: &mut Ctx) {
     let req = req.replace('!', "");
     let inst = dotnet_versions(app_view(ctx));
     let ok = inst.iter().any(|v| v == &req) || (req.starts_with("4.") && inst.iter().any(|v| v.starts_with("4.") && ver_ge(v, &req)));
-    if !ok {
+    if ok {
+        ctx.ok(&format!("!dotnet {}: found (installed: {})", req, inst.join(", ")));
+    } else {
+        ctx.err(&format!("!dotnet {}: not found (installed: {})", req, inst.join(", ")));
         ctx.msg(&format!("The main application requires .NET Framework version {} to run.", req));
         if exit {
             exit_code(EXIT_REQUIREMENT);
@@ -526,17 +545,18 @@ pub fn dotnet_init(ctx: &mut Ctx) {
 // ------------------------------------------------------------------- Internet
 
 pub fn is_online() -> bool {
-    if !sys::ping("127.0.0.1", 4000) {
-        return false;
-    }
     // The probes (ICMP, and TCP for networks that block it) run side by side: the answer is "online" as soon as one
-    // works and "offline" when the slowest has failed, about 4 seconds instead of the sum of all of them.
+    // works and "offline" when the slowest has failed, about 4 seconds instead of the sum of all of them. The last
+    // two use addresses, not names, so a DNS that is down does not make a working connection look offline. There is
+    // no probe of the loopback address: a firewall that blocks it says nothing about the connection.
     let (tx, rx) = std::sync::mpsc::channel();
-    let probes: [fn() -> bool; 4] = [
+    let probes: [fn() -> bool; 6] = [
         || sys::ping("www.google.com", 4000),
         || sys::ping("www.microsoft.com", 4000),
         || sys::tcp_reachable("www.microsoft.com", 443, 4000),
         || sys::tcp_reachable("www.google.com", 443, 4000),
+        || sys::ping("1.1.1.1", 4000),
+        || sys::tcp_reachable("1.1.1.1", 443, 4000),
     ];
     for probe in probes {
         let tx = tx.clone();
@@ -555,6 +575,7 @@ pub fn online_init(ctx: &mut Ctx) {
     }
     let mode = auto_num(&v);
     let online = is_online();
+    ctx.log(&format!("!online {}: this computer is {}", mode, if online { "online" } else { "offline" }));
     let t = ctx.title.clone();
     match (online, mode) {
         (false, 1) => {
@@ -566,7 +587,10 @@ pub fn online_init(ctx: &mut Ctx) {
             ctx.msg("The main application requires an active Internet connection to run.");
             exit_code(EXIT_REQUIREMENT);
         }
-        (false, -1) => exit_code(EXIT_REQUIREMENT),
+        (false, -1) => {
+            ctx.err("!online: an Internet connection is required, exiting");
+            exit_code(EXIT_REQUIREMENT)
+        }
         (true, -2) => {
             if !ui::ok_cancel(&t, "The main application requires an inactive Internet connection to run. Continue anyway?") {
                 exit_code(EXIT_CANCELLED);
@@ -576,7 +600,10 @@ pub fn online_init(ctx: &mut Ctx) {
             ctx.msg("The main application requires an inactive Internet connection to run.");
             exit_code(EXIT_REQUIREMENT);
         }
-        (true, -4) => exit_code(EXIT_REQUIREMENT),
+        (true, -4) => {
+            ctx.err("!online: no Internet connection is required, exiting");
+            exit_code(EXIT_REQUIREMENT)
+        }
         _ => {}
     }
 }
@@ -628,6 +655,7 @@ pub fn os_init(ctx: &mut Ctx) {
         n => n,
     }
     .to_string();
+    ctx.log(&format!("!os {}: the host is Windows {}.{} build {}", os, ma, mi, build));
     if !older && cur < thr {
         ctx.msg(&format!("The main application requires a host Operating System equal Windows {} or newer.", pretty));
         exit_code(EXIT_REQUIREMENT);
@@ -636,10 +664,14 @@ pub fn os_init(ctx: &mut Ctx) {
         ctx.msg(&format!("The main application requires a host Operating System equal Windows {} or older.", pretty));
         exit_code(EXIT_REQUIREMENT);
     }
+    ctx.ok(&format!("!os {}: satisfied", os));
 }
 
 pub fn wait_init(ctx: &mut Ctx) {
     ctx.waitprocess = general(ctx, "!waitprocess", "");
+    if !ctx.waitprocess.is_empty() {
+        ctx.log(&format!("!waitprocess: after the main application closes, waits for \"{}\"", ctx.waitprocess));
+    }
 }
 
 #[cfg(test)]

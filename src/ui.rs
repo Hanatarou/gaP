@@ -99,8 +99,11 @@ pub fn clip_get() -> String {
         if !h.is_null() {
             let p = GlobalLock(h as _) as *const u16;
             if !p.is_null() {
+                // The text ends at the first NUL, or at the end of the block when the program that put it there
+                // did not end it.
+                let room = GlobalSize(h as _) / 2;
                 let mut n = 0;
-                while *p.add(n) != 0 {
+                while n < room && *p.add(n) != 0 {
                     n += 1;
                 }
                 out = String::from_utf16_lossy(std::slice::from_raw_parts(p, n));

@@ -39,8 +39,8 @@ fn main() {
     } else if eq_ic(&cmd, "-help") {
         // FileInstall(..., flag 0): does not overwrite.
         let p = format!("{}\\gaP_Help.txt", ctx.script_dir.trim_end_matches('\\'));
-        if !std::path::Path::new(&p).exists() {
-            let _ = std::fs::write(&p, HELP_TXT);
+        if !std::path::Path::new(&p).exists() && std::fs::write(&p, HELP_TXT).is_err() {
+            ctx.msg(&format!("The help file \"{}\" could not be created.", p));
         }
         clean::clean_all(&ctx.script_full, None);
         exit_now();
@@ -59,7 +59,7 @@ fn launcher(ctx: &mut Ctx) {
     checks::read_only_init(ctx);
 
     if has_ini {
-        if std::fs::File::open(&ctx.ini_path).is_err() {
+        if !ctx.ini.existed {
             ctx.msg(&format!("An error occurred when opening and reading the \"{}.ini\" file.", ctx.exe_name));
             exit_code(EXIT_CONFIG);
         }
@@ -78,7 +78,9 @@ fn launcher(ctx: &mut Ctx) {
         // No .ini and none created is a configuration problem, unless the user refused to create it: that is a
         // question that was cancelled.
         let mut code = EXIT_CONFIG;
-        if !ctx.is_readonly {
+        if ctx.is_readonly {
+            ctx.msg(&format!("The \"{}.ini\" file does not exist and can't be created: the drive is read only.", ctx.exe_name));
+        } else {
             if ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?") {
                 // IMPROVEMENT: the original ignored the failure to create the .ini.
                 match std::fs::write(&ctx.ini_path, INI_TEMPLATE) {

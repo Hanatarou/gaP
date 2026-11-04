@@ -360,7 +360,8 @@ Examples:
 Notes:
 
 * If not specified otherwise gaP defaults this option to "0"
-  asking user what to do.
+  asking user what to do; and
+* Any other value is not valid: gaP shows a message and uses "0".
 
 [!online]
 Description:
@@ -383,7 +384,8 @@ Examples:
 
 Notes:
 
-* None.
+* gaP considers the computer online when at least one of its tests (ping
+  and TCP connection to well known servers) succeeds.
 
 [!os]
 Description:
@@ -562,7 +564,10 @@ Notes:
   (exit code 7) before changing anything. Restore it by hand or delete it
   and run gaP again; and
 * If the original data can't be saved to "_backup", the item is skipped and
-  nothing of it is changed.
+  nothing of it is changed; and
+* If the key can't be cleared before the portable settings are imported,
+  gaP warns, imports nothing and saves nothing in this run, and the
+  original data is put back in the AFTER section.
 * Operations on BEFORE section:
 1. backup regkey "HKCU\Software\RegKey" to "HKCU\Software\RegKey_backup"
 2. import file "settings.reg" to the registry
@@ -1192,7 +1197,9 @@ Notes:
 * The new variable can be used as "{MyVar}" later on; and
 * The value is kept exactly as it is in the file, so "{" and "}" in it are
   just text. Add the optional segment "expand" if the value has gaP macros
-  and they have to be expanded (once, when the value is read).
+  and they have to be expanded (once, when the value is read); and
+* Files bigger than 64 MB are not read: gaP shows a message and leaves the
+  file as it is.
 
 [iniwrite]
 Description:
@@ -1222,7 +1229,9 @@ Notes:
   the word "NULL" as "Ini section name"; and
 * Set the "Ini section key" or the "Ini section key value"
   fields values to "*NULL*" to write the word "NULL" as
-  "Ini section key" or as "Ini section key value".
+  "Ini section key" or as "Ini section key value"; and
+* Files bigger than 64 MB are not read: gaP shows a message and leaves the
+  file as it is.
 
 [keeponly]  
 Description:
@@ -1401,7 +1410,9 @@ regmerge = Settings\settings.reg :: Settings\anotherfile.reg
 
 Notes:
 
-* The contents of the second reg file will be appended to the first reg file.
+* The contents of the second reg file will be appended to the first reg file; and
+* Files bigger than 64 MB are not read: gaP shows a message and leaves the
+  file as it is.
 
 [replace]
 Description:
@@ -1418,7 +1429,8 @@ replace = C:\MyFile.txt :: hello :: hi
 
 Notes:
 
-* None.
+* Files bigger than 64 MB are not read: gaP shows a message and leaves the
+  file as it is.
 
 [replaceline]
 Description:
@@ -1435,7 +1447,8 @@ replaceline = Settings.xml :: <checkForUpdates :: <checkForUpdates value="0"/>
 
 Notes:
 
-* None.
+* Files bigger than 64 MB are not read: gaP shows a message and leaves the
+  file as it is.
 
 [restore]
 Description:

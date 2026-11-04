@@ -81,7 +81,7 @@ pub fn giniread(ctx: &mut Ctx, args: &[String]) {
     // Optional 5th segment "expand": the value read is text of the gaP world and its macros are expanded once.
     // Without it the value is data from another file and is kept as it is.
     let expand = eq_ic(&ctx.expand(arg(args, 4)), "expand");
-    if !util::is_file(&file) {
+    if !util::is_file(&file) || ctx.refuse_big(&file) {
         return;
     }
     let doc = IniDoc::load(&file);
@@ -107,6 +107,9 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
         val.clear();
     }
     let val = val.replace("*NULL*", "NULL");
+    if ctx.refuse_big(&file) {
+        return;
+    }
     let mut doc = IniDoc::load(&file);
     let delete_section = sec.starts_with("--");
     if delete_section {
@@ -248,15 +251,15 @@ pub fn grun(ctx: &mut Ctx, args: &[String]) {
 fn service_exe_exists(spec: &str) -> bool {
     let s = spec.trim();
     if let Some(rest) = s.strip_prefix('"') {
-        return rest.find('"').map(|i| util::exists(&rest[..i])).unwrap_or(false);
+        return rest.find('"').map(|i| util::is_file(&rest[..i])).unwrap_or(false);
     }
-    if util::exists(s) {
+    if util::is_file(s) {
         return true;
     }
     let mut pos = 0;
     while let Some(i) = s[pos..].find(' ') {
         pos += i;
-        if util::exists(&s[..pos]) {
+        if util::is_file(&s[..pos]) {
             return true;
         }
         pos += 1;
