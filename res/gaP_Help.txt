@@ -257,7 +257,9 @@ commandline = --dir="{GAPROOT}\Settings"
 
 Notes:
 
-* None.
+* The text is added to the command line of the main application, before
+  the parameters that were given on the command line of the launcher; and
+* It is also available as the {COMMANDLINE} variable.
 
 [workdir]
 Description:
@@ -294,7 +296,8 @@ Examples:
 
 Notes:
 
-* None.
+* The value 0 does nothing. Any other value that is not -1, 1 or 2 is not
+  valid: gaP shows a message and ignores the option.
 
 [!dotnet]
 Description:
@@ -309,6 +312,7 @@ Syntax:
 Examples:
 
 !dotnet = 4.0
+!dotnet = 4                          ; any 4.x version
 !dotnet = 2.1!
 
 Notes:
@@ -317,7 +321,9 @@ Notes:
   and
 * The check follows the architecture of the main application: the 32-bit
   .NET Framework for an x86 application and the 64-bit one for an x64
-  application (on a 64-bit Windows).
+  application (on a 64-bit Windows); and
+* If the version is missing or is not a number, gaP shows a message and
+  ignores the option.
 
 [!java]
 Description:
@@ -340,7 +346,8 @@ Notes:
   and
 * The check follows the architecture of the main application: the 32-bit
   Java for an x86 application and the 64-bit Java for an x64 application
-  (on a 64-bit Windows).
+  (on a 64-bit Windows); and
+* If the version is missing, gaP shows a message and ignores the option.
 
 [!multiple]
 Description:
@@ -385,7 +392,10 @@ Examples:
 Notes:
 
 * gaP considers the computer online when at least one of its tests (ping
-  and TCP connection to well known servers) succeeds.
+  and TCP connection to well known servers) succeeds, and offline when
+  none does within 5 seconds; and
+* The value 0 does nothing. Any other value that is not -4, -3, -2, -1,
+  1 or 2 is not valid: gaP shows a message and ignores the option.
 
 [!os]
 Description:
@@ -433,7 +443,9 @@ Examples:
 Notes:
 
 * If not specified otherwise gaP defaults this option to "1" showing
-  a dialog box regarding read only drive and continuing.
+  a dialog box regarding read only drive and continuing; and
+* The value 0 does nothing. Any other value that is not -2, -1, 1 or 2 is
+  not valid: gaP shows a message and uses "1".
 
 [!waitprocess]
 Description:
@@ -555,6 +567,8 @@ regkey = HKLM\Software\RegKey :: NULL :: x64               ; save the x64 reg ke
 Notes:
 
 * This function works ONLY in the BEFORE section;
+* A registry root and the "Software" key of "HKCU" and "HKLM" are refused
+  with a message and the item is skipped;
 * If the target registry export file is missing the registry key will
   be exported to "settings.reg" to the launcher's root directory;
 * If the Registry flag is not declared it defaults to "x86";
@@ -702,6 +716,8 @@ Examples:
 Notes:
 
 * This function works ONLY in the BEFORE section;
+* A registry root and the "Software" key of "HKCU" and "HKLM" are refused
+  with a message and the item is skipped;
 * If the Registry flag is not declared it defaults to "x86";
 * The name ending in "_backup" is reserved: gaP uses it only while it runs.
   If one is still there when gaP starts, an earlier run did not finish and
@@ -778,7 +794,8 @@ Notes:
 * Use the "move" flag to move directory contents instead of "copy".
   After moving the source directory is deleted;
 * Use the "no overwrite" flag to skip operation if the target already
-  exists;
+  exists. A word in the flag that is not copy, move, overwrite or
+  no overwrite is reported in the log and ignored;
 * To rename a directory move directory contents to a different
   directory on the same path;
 * An empty target directory (NULL) defaults to "Settings" subdirectory
@@ -814,7 +831,8 @@ Notes:
 * Use the "move" flag to move file instead of copy. After moving the
   source file is deleted;
 * Use the "no overwrite" flag to skip operation if the target already
-  exists;
+  exists. A word in the flag that is not copy, move, overwrite or
+  no overwrite is reported in the log and ignored;
 * If target is a directory then the target filename will be the same
   as the source filename;
 * To rename a file move file to a different filename on the same path;
@@ -839,13 +857,17 @@ Examples:
 Notes:
 
 * Use "<-regkey" keyword to reverse direction;
+* A registry root and the "Software" key of "HKCU" and "HKLM" are never
+  moved;
 * Use the "move" flag to move registry key contents instead of copy.
   After moving the source key is deleted;
 * If the Registry flag is not declared it defaults to "x86";
 * To rename a registry key move key contents to a different key under
   the same key; and
 * If the target registry key is left empty or source and target are
-  equal no operation will be done.
+  equal no operation will be done; and
+* If the target registry key is inside the source registry key gaP shows
+  a message and no operation will be done.
 
 [->regvalue]
 Description:
@@ -888,7 +910,8 @@ Examples:
 
 Notes:
 
-* None.
+* A directory that already exists is not an error; one that can't be
+  created is reported in the log and nothing else is done.
 
 [+file]
 Description:
@@ -908,10 +931,13 @@ Examples:
 Notes:
 
 * If the "no overwrite" flag is present the file will not be created if
-  already exists;
-* File contents can be set in the third segment; and
+  already exists. Any other flag is reported in the log and the file is
+  not created;
+* File contents can be set in the third segment;
 * Set the "file contents" field value to "*NULL*" to write the word
-  "NULL" in the file.
+  "NULL" in the file; and
+* A file that can't be created is reported in the log and nothing else
+  is done.
  
 [+regkey]
 Description:
@@ -980,7 +1006,11 @@ Notes:
 
 * Wildcard characters "?" and "*" are allowed in directory names; and
 * If the "ifempty" flag is present, gaP will delete the directory only
-  if the directory is empty.
+  if the directory is empty;
+* Any other flag is not valid: gaP shows a message in the log and deletes
+  nothing; and
+* A drive root, a directory that holds the launcher and the launcher itself
+  are never deleted.
 
 [-file]
 Description:
@@ -998,7 +1028,8 @@ Examples:
 
 Notes:
 
-* Wildcard characters "?" and "*" are allowed in file names.
+* Wildcard characters "?" and "*" are allowed in file names; and
+* The launcher and its configuration file are never deleted.
 
 [-regkey]
 Description:
@@ -1017,7 +1048,11 @@ Examples:
 Notes:
 
 * If the "ifempty" flag is present, gaP will delete the registry key only
-  if the key is empty; and
+  if the key is empty;
+* Any other flag is not valid: gaP shows a message in the log and deletes
+  nothing;
+* A registry root and the "Software" key of "HKCU" and "HKLM" are never
+  deleted; and
 * If the Registry flag is not declared it defaults to "x86".
 
 [-regvalue]
@@ -1057,7 +1092,10 @@ Notes:
 * Separate multiple items with commas;
 * Available attributes: "archive", "compressed", "hidden", "normal",
   "offline", "readonly", "system" and "temporary";
-* If no attribute is supplied the attribute defaults to "normal"; and
+* If no attribute is supplied the attribute defaults to "normal";
+* Each element is one letter (A, C, H, O, R, S, T) or the whole word,
+  and NULL; anything else (such as "RASHNOT" in one piece) is reported in
+  the log and ignored; and
 * Setting directory attributes is not recursive, directory content
   attributes will not be modified.
 
@@ -1078,7 +1116,9 @@ batch = SubDir\before.bat :: show
 Notes:
 
 * If the "show" flag is present, the cmd window will show until the
-  launcher exits.
+  launcher exits; and
+* A file that does not exist, or a flag that is not hide or show, is
+  reported in the log and nothing is run.
 
 [clean]
 Description:
@@ -1138,7 +1178,8 @@ Notes:
   If missing, defaults to system date;
 * Setting date to "now" also sets date to current system date; and
 * "Date type" can have the values "created", "accessed" or "modified".
-  Defaults to "modified" if empty.
+  Defaults to "modified" if empty. Any other value is not valid: gaP
+  reports it in the log and changes nothing.
 
 [delay]
 Description:
@@ -1155,7 +1196,7 @@ delay = 500
 
 Notes:
 
-* None.
+* A value that is not a number is reported in the log and gaP does not wait.
 
 [envvar]
 Description:
@@ -1197,7 +1238,9 @@ Notes:
 * The new variable can be used as "{MyVar}" later on; and
 * The value is kept exactly as it is in the file, so "{" and "}" in it are
   just text. Add the optional segment "expand" if the value has gaP macros
-  and they have to be expanded (once, when the value is read); and
+  and they have to be expanded (once, when the value is read). Any other
+  word in that place is reported in the log and the value is kept as it is;
+  and
 * Files bigger than 64 MB are not read: gaP shows a message and leaves the
   file as it is.
 
@@ -1253,7 +1296,13 @@ Notes:
 Wildcard characters "?" and "*" are allowed in the filter
 for files or folders. The highest or lowest parameter will
 get the highest or lowest date among modified, created and
-accessed dates.  
+accessed dates.
+
+A drive root or a folder that holds the launcher is never deleted: gaP
+shows a message and goes on with the next one.
+
+The number of items to keep has to be a whole number, 0 or more. Anything
+else shows a message and nothing is deleted.
   
 [killprocess]
 Description:
@@ -1293,7 +1342,8 @@ The launcher waits until the dialog box is closed. No message is
 shown if the supplied text is empty. If the "cancellable" flag
 is used, the dialog will have an extra "Cancel" button mainly for
 testing purposes. Note that when cancelling the message the launcher
-will quit so no items after the message will be executed.
+will quit so no items after the message will be executed. Any other
+flag is reported in the log and a plain message is shown.
 
 [nowait]
 Description:
@@ -1310,7 +1360,7 @@ nowait = 1
 
 Notes:
 
-None.
+Any value other than 1 (or 0) is reported in the log and ignored.
 
 [quit]
 Description:
@@ -1330,7 +1380,8 @@ Notes:
 No AFTER items will be executed. The main application will not be
 terminated if it has been already launched. By using "quit" in the
 BEFORE section it is possible to execute items without launching
-the main application.
+the main application. Any value other than 1 (or 0) is reported in the
+log and ignored.
 
 [regdll]
 Description:
@@ -1349,7 +1400,9 @@ regdll = Dir\Library.dll :: unregister
 
 Notes:
 
-* Administrator rights may be required for this operation.
+* Administrator rights may be required for this operation; and
+* A file that does not exist, or a flag that is not register or unregister,
+  is reported in the log and nothing is done.
 
 [regexport]
 Description:
@@ -1492,7 +1545,10 @@ run = %Windir%\Notepad.exe
 Notes:
 
 * If the "wait" flag is used gaP will wait for the application to
-  terminate before processing the next config item.
+  terminate before processing the next config item. Any other word in
+  that place is reported in the log and gaP does not wait; and
+* An application that does not exist is reported in the log and nothing
+  is run.
 
 [service]
 Description:
@@ -1515,7 +1571,10 @@ Notes:
 * User must use the real name of the service not the service's
   display name. User can use "services.msc" tool to find the 
   "service name" under the service entry; and
-* If the Service type parameter is not declared it defaults to "own".
+* If the Service type parameter is not declared it defaults to "own";
+* An action that is not create, delete, start or stop, a "create" whose
+  file does not exist and a Service type that is not valid are reported in
+  the log and nothing is done.
 
 [stringreplace]
 Description:
@@ -1559,7 +1618,10 @@ Notes:
 * The symlink is removed when the launcher terminates; and
 * An NTFS (or ReFS) file system is needed. Creating the link needs
   administrator rights or the Windows Developer Mode: gaP tries first
-  without administrator rights and shows a message if it fails.
+  without administrator rights and shows a message if it fails; and
+* A flag that is not create or remove, a target that does not exist and a
+  link or target on a network path or on a drive that is not NTFS or ReFS
+  are reported in the log and no link is created.
 
 [systemrefresh]
 Description:
@@ -1576,7 +1638,7 @@ systemrefresh = 1
 
 Notes:
 
-* None.
+* Any value other than 1 (or 0) is reported in the log and ignored.
 
 [uservar]
 Description:

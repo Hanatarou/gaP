@@ -40,12 +40,34 @@ pub fn clean_kw(ctx: &mut Ctx, args: &[String]) {
 }
 
 pub fn delay(ctx: &mut Ctx, args: &[String]) {
-    let ms = ctx.expand_num(arg(args, 0)).clamp(0, i32::MAX as i64) as u64;
-    std::thread::sleep(std::time::Duration::from_millis(ms));
+    let t = ctx.expand(arg(args, 0));
+    let Ok(ms) = t.trim().parse::<i64>() else {
+        ctx.warn(&format!("delay: \"{}\" is not a number of milliseconds; gaP did not wait", t.trim()));
+        return;
+    };
+    std::thread::sleep(std::time::Duration::from_millis(ms.clamp(0, i32::MAX as i64) as u64));
+}
+
+/// The value of a switch that is 1 (on) or 0 (off), as in `quit = 1`. Anything else is reported and read as off.
+fn switch_on(ctx: &mut Ctx, kw: &str, args: &[String]) -> bool {
+    if args.is_empty() {
+        return false;
+    }
+    let t = ctx.expand(&args[0]);
+    match t.trim().parse::<i64>() {
+        Ok(1) => true,
+        Ok(0) => false,
+        _ => {
+            if !t.trim().is_empty() && !is_null(t.trim()) {
+                ctx.warn(&format!("{}: \"{}\" is not valid, use 1 (or 0); it was ignored", kw, t.trim()));
+            }
+            false
+        }
+    }
 }
 
 pub fn envvar(ctx: &mut Ctx, args: &[String]) {
-    let name = ctx.expand(arg(args, 0));
+    let name = ctx.expand(arg(args, 0)).trim().to_string();
     let val = ctx.expand(arg(args, 1));
     if !name.is_empty() && !name.contains('=') && !name.contains('\0') && !val.contains('\0') {
         std::env::set_var(name, val);
@@ -63,7 +85,7 @@ pub fn set_user_var(ctx: &mut Ctx, name: &str, value: &str) {
 }
 
 pub fn uservar(ctx: &mut Ctx, args: &[String]) {
-    let name = arg(args, 0).to_string();
+    let name = arg(args, 0).trim().to_string();
     let reserved = RESERVED_VARS.iter().any(|r| eq_ic(r, &name)) || FUNC_MACROS.iter().any(|r| eq_ic(r, &name));
     if reserved {
         set_user_var(ctx, &name, "");
@@ -80,7 +102,11 @@ pub fn giniread(ctx: &mut Ctx, args: &[String]) {
     let var = ctx.expand(arg(args, 3));
     // Optional 5th segment "expand": the value read is text of the gaP world and its macros are expanded once.
     // Without it the value is data from another file and is kept as it is.
-    let expand = eq_ic(&ctx.expand(arg(args, 4)), "expand");
+    let flag = ctx.expand(arg(args, 4)).trim().to_string();
+    let expand = eq_ic(&flag, "expand");
+    if !flag.is_empty() && !is_null(&flag) && !expand {
+        ctx.warn(&format!("giniread: \"{}\" is not valid, use expand; the value is kept as it is", flag));
+    }
     if !util::is_file(&file) || ctx.refuse_big(&file) {
         return;
     }
@@ -96,7 +122,7 @@ pub fn giniread(ctx: &mut Ctx, args: &[String]) {
 
 pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
     let file = full(ctx, arg(args, 0));
-    let mut sec = ctx.expand(arg(args, 1));
+    let mut sec = ctx.expand(arg(args, 1)).trim().to_string();
     let mut key = ctx.expand(arg(args, 2));
     if is_null(&key) {
         key.clear();
@@ -113,7 +139,7 @@ pub fn giniwrite(ctx: &mut Ctx, args: &[String]) {
     let mut doc = IniDoc::load(&file);
     let delete_section = sec.starts_with("--");
     if delete_section {
-        sec = sec[2..].to_string();
+        sec = sec[2..].trim().to_string();
     }
     if delete_section {
         if is_null(&sec) {
@@ -143,7 +169,7 @@ pub fn stringreplace(ctx: &mut Ctx, args: &[String]) {
     let text = ctx.expand(arg(args, 0));
     let find = ctx.expand(arg(args, 1));
     let mut rep = ctx.expand(arg(args, 2));
-    let var = ctx.expand(arg(args, 3));
+    let var = ctx.expand(arg(args, 3)).trim().to_string();
     if is_null(&rep) {
         rep.clear();
     }
@@ -165,7 +191,11 @@ pub fn message(ctx: &mut Ctx, args: &[String]) {
     if text.is_empty() {
         return;
     }
-    if eq_ic(arg(args, 1), "cancellable") {
+    let flag = arg(args, 1).trim();
+    if !flag.is_empty() && !is_null(flag) && !eq_ic(flag, "cancellable") {
+        ctx.warn(&format!("message: \"{}\" is not valid, use cancellable; a plain message was shown", flag));
+    }
+    if eq_ic(flag, "cancellable") {
         if !ui::ok_cancel_topmost(&ctx.title, &text) {
             exit_code(EXIT_CANCELLED);
         }
@@ -175,8 +205,7 @@ pub fn message(ctx: &mut Ctx, args: &[String]) {
 }
 
 pub fn nowait(ctx: &mut Ctx, sec: Section, args: &[String]) {
-    let v = if args.is_empty() { 0 } else { ctx.expand_num(&args[0]) };
-    if v == 1 {
+    if switch_on(ctx, "nowait", args) {
         match sec {
             Section::Before => {
                 ctx.run_after = false;
@@ -188,8 +217,7 @@ pub fn nowait(ctx: &mut Ctx, sec: Section, args: &[String]) {
 }
 
 pub fn quit(ctx: &mut Ctx, args: &[String]) {
-    let v = if args.is_empty() { 0 } else { ctx.expand_num(&args[0]) };
-    if v == 1 {
+    if switch_on(ctx, "quit", args) {
         exit_now();
     }
 }
@@ -198,11 +226,12 @@ pub fn regdll(ctx: &mut Ctx, args: &[String]) {
     // regsvr32 runs with the architecture of the application, so it registers the DLL
     // in the registry view of the application and resolves the path itself.
     let file = full_logical(ctx, arg(args, 0));
-    let mut flag = ctx.expand(arg(args, 1));
+    let mut flag = ctx.expand(arg(args, 1)).trim().to_string();
     if is_null(&flag) || flag.is_empty() {
         flag = "register".into();
     }
     if !util::is_file(&ctx.io_path(&file)) {
+        ctx.warn(&format!("regdll \"{}\": the file does not exist, nothing to do", file));
         return;
     }
     let exe = sys::system32_for(ctx.app_arch, "regsvr32.exe");
@@ -211,6 +240,7 @@ pub fn regdll(ctx: &mut Ctx, args: &[String]) {
     } else if eq_ic(&flag, "unregister") {
         sys::run_hidden_wait(&exe, &["/U", "/S", &file])
     } else {
+        ctx.warn(&format!("regdll \"{}\": \"{}\" is not valid, use register or unregister; nothing was done", file, flag));
         return;
     };
     if ok {
@@ -223,7 +253,10 @@ pub fn regdll(ctx: &mut Ctx, args: &[String]) {
 /// `run = App [:: wait] [:: parameters] [:: folder]`.
 pub fn grun(ctx: &mut Ctx, args: &[String]) {
     let app = full(ctx, arg(args, 0));
-    let wait = ctx.expand(arg(args, 1));
+    let wait = ctx.expand(arg(args, 1)).trim().to_string();
+    if !wait.is_empty() && !is_null(&wait) && !eq_ic(&wait, "wait") {
+        ctx.warn(&format!("run: \"{}\" is not valid, use wait; gaP does not wait for the application", wait));
+    }
     let mut cl = ctx.expand(arg(args, 2));
     if is_null(&cl) {
         cl.clear();
@@ -235,6 +268,7 @@ pub fn grun(ctx: &mut Ctx, args: &[String]) {
         util::path_full(&wd, &ctx.script_dir)
     };
     if !util::exists(&app) {
+        ctx.warn(&format!("run \"{}\": the file does not exist, nothing to run", app));
         return;
     }
     let cmd = if cl.is_empty() { format!("\"{}\"", app) } else { format!("\"{}\" {}", app, cl) };
@@ -352,20 +386,30 @@ fn scm_do(name: &str, flag: &str, file: &str, typ: &str) -> Result<(), u32> {
                 }
                 Ok(())
             }
-            _ => Ok(()),
+            // ERROR_INVALID_PARAMETER: an action that is not handled above is an error, not a success
+            _ => Err(87),
         }
     }
 }
 
 pub fn service(ctx: &mut Ctx, args: &[String]) {
     let name = ctx.expand(arg(args, 0));
-    let flag = ctx.expand(arg(args, 1)).to_lowercase();
+    let flag = ctx.expand(arg(args, 1)).trim().to_lowercase();
     let file = ctx.expand(arg(args, 2));
     let mut typ = ctx.expand(arg(args, 3));
     if is_null(&typ) || typ.is_empty() {
         typ = "own".into();
     }
+    if !matches!(flag.as_str(), "create" | "delete" | "start" | "stop") {
+        ctx.warn(&format!("service \"{}\": \"{}\" is not valid, use create, delete, start or stop; nothing was done", name, flag));
+        return;
+    }
     if flag == "create" && !service_exe_exists(&file) {
+        ctx.warn(&format!("service \"{}\": the file \"{}\" does not exist, the service was not created", name, file));
+        return;
+    }
+    if flag == "create" && service_type(&typ).is_none() {
+        ctx.warn(&format!("service \"{}\": the type \"{}\" is not valid, the service was not created", name, typ));
         return;
     }
     if let Err(code) = scm_do(&name, &flag, &file, &typ) {
@@ -374,7 +418,7 @@ pub fn service(ctx: &mut Ctx, args: &[String]) {
 }
 
 pub fn symlink(ctx: &mut Ctx, args: &[String]) {
-    let flag = if args.len() > 2 { ctx.expand(&args[2]) } else { "Create".to_string() };
+    let flag = if args.len() > 2 { ctx.expand(&args[2]).trim().to_string() } else { "Create".to_string() };
     let link = full_logical(ctx, arg(args, 0));
     let target = full_logical(ctx, arg(args, 1));
     if eq_ic(&flag, "remove") {
@@ -384,9 +428,11 @@ pub fn symlink(ctx: &mut Ctx, args: &[String]) {
         return;
     }
     if !eq_ic(&flag, "create") {
+        ctx.warn(&format!("symlink \"{}\": \"{}\" is not valid, use create or remove; nothing was done", link, flag));
         return;
     }
     if !util::exists(&target) {
+        ctx.warn(&format!("symlink \"{}\": the target \"{}\" does not exist, no link was created", link, target));
         return;
     }
     let ok_fs = |p: &str| {
@@ -394,6 +440,10 @@ pub fn symlink(ctx: &mut Ctx, args: &[String]) {
         util::contains_ic(&f, "NTFS") || util::contains_ic(&f, "ReFS")
     };
     if !ok_fs(&link) || !ok_fs(&target) {
+        ctx.warn(&format!(
+            "symlink \"{}\": links need a local NTFS or ReFS drive for the link and the target (a network path is not supported); no link was created",
+            link
+        ));
         return;
     }
     let is_dir = util::is_dir(&target);
@@ -447,8 +497,7 @@ pub fn remove_symlink(link: &str, is_dir: bool) {
 }
 
 pub fn systemrefresh(ctx: &mut Ctx, args: &[String]) {
-    let v = if args.is_empty() { 0 } else { ctx.expand_num(&args[0]) };
-    if v == 1 {
+    if switch_on(ctx, "systemrefresh", args) {
         unsafe {
             windows_sys::Win32::UI::Shell::SHChangeNotify(0x0800_0000, 0x1000, null_mut(), null_mut());
         }

@@ -10,8 +10,16 @@ use crate::{sys, util};
 use util::{arg, eq_ic, is_null};
 
 /// Registry view flag: NULL/empty/x86 = 32 bits; x64 = 64 bits.
-fn view_of(ctx: &mut Ctx, s: &str) -> View {
-    let f = ctx.expand(s);
+/// The registry view of a flag. `item` (the key or file of the item) goes in the message about a flag that is not valid.
+fn view_of(ctx: &mut Ctx, s: &str, item: &str) -> View {
+    let f = ctx.expand(s).trim().to_string();
+    if !f.is_empty() && !is_null(&f) && !eq_ic(&f, "x86") && !eq_ic(&f, "x64") {
+        // the check at the start (`quiet`) expands the same flag; the item says it when it runs
+        if !ctx.quiet.get() {
+            ctx.warn(&format!("\"{}\": the registry flag \"{}\" is not valid, use x86 or x64; x86 was used", item, f));
+        }
+        return View::X86;
+    }
     View::from_flag(if f.is_empty() || is_null(&f) { "x86" } else { &f })
 }
 
@@ -69,6 +77,14 @@ fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
 pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool {
     if eq_ic(src, tgt) {
         return true;
+    }
+    if mv && too_broad(src) {
+        ctx.msg(&format!("Refusing to move \"{}\" (a registry root or a whole Software, Classes or Wow6432Node key).", src));
+        return false;
+    }
+    if tgt.to_lowercase().starts_with(&format!("{}\\", src.to_lowercase())) {
+        ctx.msg(&format!("Registry operation skipped: \"{}\" is inside \"{}\".", tgt, src));
+        return false;
     }
     match reg::copy_tree(src, tgt, view) {
         Ok(()) => {
@@ -132,6 +148,27 @@ fn not_saved(ctx: &Ctx, what: &str, src: &str) {
     ctx.msg(&format!("The original {} \"{}\" could not be saved, so this item was skipped and nothing was changed.", what, src));
 }
 
+/// An earlier run that did not finish left its original data in `backup`: copying over it would lose it. Used when the
+/// item runs, for the items that the check at the start could not look at. The item is skipped and nothing of it is
+/// changed.
+fn backup_busy(ctx: &Ctx, what: &str, backup: &str, view: View) -> bool {
+    let present = if what.contains("value") {
+        let (k, v) = split_value(backup);
+        reg::value_exists(&k, &v, view)
+    } else {
+        reg::key_present(backup, view)
+    };
+    if !present {
+        return false;
+    }
+    ctx.err(&format!("leftover backup \"{}\"", backup));
+    ctx.msg(&format!(
+        "An earlier run did not finish and left the original {} in \"{}\". This item was skipped and nothing was changed. Restore or delete it and run again.",
+        what, backup
+    ));
+    true
+}
+
 pub fn ltr_regkey(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let (mut a, mut b) = (arg(args, 0).to_string(), arg(args, 1).to_string());
     if rtl {
@@ -140,8 +177,8 @@ pub fn ltr_regkey(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let src = key_of(ctx, &a);
     let tgt = key_of(ctx, &b);
     let cflag = ctx.expand(arg(args, 2));
-    let view = view_of(ctx, arg(args, 3));
-    copy_key(ctx, &src, &tgt, eq_ic(&cflag, "move"), view);
+    let view = view_of(ctx, arg(args, 3), &src);
+    copy_key(ctx, &src, &tgt, eq_ic(cflag.trim(), "move"), view);
 }
 
 pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
@@ -152,15 +189,15 @@ pub fn ltr_regvalue(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let src = key_of(ctx, &a);
     let tgt = key_of(ctx, &b);
     let cflag = ctx.expand(arg(args, 2));
-    let view = view_of(ctx, arg(args, 3));
-    copy_value(ctx, &src, &tgt, eq_ic(&cflag, "move"), view);
+    let view = view_of(ctx, arg(args, 3), &src);
+    copy_value(ctx, &src, &tgt, eq_ic(cflag.trim(), "move"), view);
 }
 
 // ------------------------------------------------------------ create / delete
 
 pub fn plus_regkey(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
-    let view = view_of(ctx, arg(args, 1));
+    let view = view_of(ctx, arg(args, 1), &k);
     if let Err(code) = reg::create_key(&k, view) {
         change_failed(ctx, &format!("The registry key \"{}\" could not be created.", k), Some(code), &[&k]);
     } else {
@@ -177,7 +214,7 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
         kind = "REG_SZ".into();
     }
     let sep = ctx.expand(arg(args, 4));
-    let view = view_of(ctx, arg(args, 5));
+    let view = view_of(ctx, arg(args, 5), &key);
     match reg::build_value(&kind, &data, &sep) {
         Some((t, bytes)) => {
             if let Err(code) = reg::write_value(&key, &name, t, &bytes, view) {
@@ -191,11 +228,40 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
     }
 }
 
+fn is_user_or_machine(root: &str) -> bool {
+    matches!(root.to_uppercase().as_str(), "HKCU" | "HKEY_CURRENT_USER" | "HKLM" | "HKEY_LOCAL_MACHINE")
+}
+
+/// A key whose deletion would take the settings of every program of the user or of the computer: a root, or the
+/// `Software` key of `HKCU` or `HKLM`.
+fn too_broad(key: &str) -> bool {
+    let parts: Vec<&str> = key.split('\\').filter(|p| !p.is_empty()).collect();
+    match parts.as_slice() {
+        [] | [_] => true,
+        [root, sub] => is_user_or_machine(root) && eq_ic(sub, "software"),
+        // the file associations and the COM registrations (`Classes`), and the 32-bit view (`Wow6432Node`)
+        [root, sub, third] => {
+            is_user_or_machine(root) && eq_ic(sub, "software") && (eq_ic(third, "classes") || eq_ic(third, "wow6432node"))
+        }
+        _ => false,
+    }
+}
+
 pub fn minus_regkey(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
-    let eflag = ctx.expand(arg(args, 1));
-    let view = view_of(ctx, arg(args, 2));
-    delete_key(ctx, &k, eq_ic(&eflag, "ifempty"), view);
+    let eflag = ctx.expand(arg(args, 1)).trim().to_string();
+    let view = view_of(ctx, arg(args, 2), &k);
+    // No flag deletes the whole key; a flag that is not "ifempty" is a mistake, and a mistake must not delete a tree.
+    let if_empty = eq_ic(&eflag, "ifempty");
+    if !if_empty && !eflag.is_empty() && !is_null(&eflag) {
+        ctx.warn(&format!("reg delete key \"{}\": \"{}\" is not valid, use ifempty or leave it empty; nothing was deleted", k, eflag));
+        return;
+    }
+    if too_broad(&k) {
+        ctx.msg(&format!("Refusing to delete \"{}\" (a registry root or a whole Software, Classes or Wow6432Node key).", k));
+        return;
+    }
+    delete_key(ctx, &k, if_empty, view);
 }
 
 /// Deletes the key (`if_empty`: only if it has no values and no subkeys). A key that is not there is not an error;
@@ -265,7 +331,7 @@ pub fn restore_key(ctx: &Ctx, key: &str, backup: &str, view: View) {
 pub fn leftover_backup(ctx: &mut Ctx, kw: &str, args: &[String]) -> Option<String> {
     let src = key_of(ctx, arg(args, 0));
     let flag = if matches!(kw, "regkey" | "regvalue") { arg(args, 2) } else { arg(args, 1) };
-    let view = view_of(ctx, flag);
+    let view = view_of(ctx, flag, &src);
     let backup = format!("{}_backup", src);
     let present = if kw.contains("value") {
         let (k, v) = split_value(&backup);
@@ -294,7 +360,7 @@ fn delete_value_reported(ctx: &Ctx, key: &str, name: &str, view: View) {
 pub fn minus_regvalue(ctx: &mut Ctx, args: &[String]) {
     let k = key_of(ctx, arg(args, 0));
     let name = ctx.expand(arg(args, 1));
-    let view = view_of(ctx, arg(args, 2));
+    let view = view_of(ctx, arg(args, 2), &k);
     delete_value_reported(ctx, &k, &name, view);
 }
 
@@ -304,8 +370,15 @@ pub fn minus_regvalue(ctx: &mut Ctx, args: &[String]) {
 pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let file = settings_reg(ctx, arg(args, 1));
-    let view = view_of(ctx, arg(args, 2));
+    let view = view_of(ctx, arg(args, 2), &src);
+    if too_broad(&src) {
+        ctx.msg(&format!("Refusing to use \"{}\" (a registry root or a whole Software, Classes or Wow6432Node key). This item was skipped.", src));
+        return;
+    }
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "registry key", &backup, view) {
+        return;
+    }
     if !copy_key(ctx, &src, &backup, false, view) {
         not_saved(ctx, "registry key", &src);
         return;
@@ -329,9 +402,12 @@ pub fn regkey_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
     let file = settings_reg(ctx, arg(args, 1));
-    let view = view_of(ctx, arg(args, 2));
+    let view = view_of(ctx, arg(args, 2), &src);
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "registry value", &backup, view) {
+        return;
+    }
     if !copy_value(ctx, &src, &backup, false, view) {
         not_saved(ctx, "registry value", &src);
         return;
@@ -347,8 +423,15 @@ pub fn regvalue_kw(ctx: &mut Ctx, args: &[String]) {
 /// `(regkey) = Key [:: x86|x64]` (BEFORE only).
 pub fn pregkeyp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
-    let view = view_of(ctx, arg(args, 1));
+    let view = view_of(ctx, arg(args, 1), &src);
+    if too_broad(&src) {
+        ctx.msg(&format!("Refusing to use \"{}\" (a registry root or a whole Software, Classes or Wow6432Node key). This item was skipped.", src));
+        return;
+    }
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "registry key", &backup, view) {
+        return;
+    }
     if !copy_key(ctx, &src, &backup, false, view) {
         not_saved(ctx, "registry key", &src);
         return;
@@ -361,9 +444,12 @@ pub fn pregkeyp_kw(ctx: &mut Ctx, args: &[String]) {
 /// `(regvalue) = Key\Value [:: x86|x64]` (BEFORE only).
 pub fn pregvaluep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = key_of(ctx, arg(args, 0));
-    let view = view_of(ctx, arg(args, 1));
+    let view = view_of(ctx, arg(args, 1), &src);
     let (k, v) = split_value(&src);
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "registry value", &backup, view) {
+        return;
+    }
     if !copy_value(ctx, &src, &backup, false, view) {
         not_saved(ctx, "registry value", &src);
         return;
@@ -441,8 +527,11 @@ fn reg_escape(name: &str) -> String {
 }
 
 /// Keeps only the value `name` of the .reg file exported from the key `key`.
-fn filter_single_value(file: &str, key: &str, name: &str) {
-    let Some((text, enc)) = util::read_text(file) else { return };
+/// Keeps the header, the key and the one value in the exported file. `Some(false)` = the value is not in it, and the
+/// file was left as it is; `None` = the file could not be read.
+fn filter_single_value(file: &str, key: &str, name: &str) -> Option<bool> {
+    let (text, enc) = util::read_text(file)?;
+    let mut kept = 0;
     let want_key = key.to_lowercase();
     let want_val = format!("\"{}\"=", reg_escape(name)).to_lowercase();
     let mut out = String::new();
@@ -476,14 +565,20 @@ fn filter_single_value(file: &str, key: &str, name: &str) {
             continue;
         }
         if in_key && (keep_cont || t.to_lowercase().starts_with(&want_val)) {
+            if !keep_cont {
+                kept += 1;
+            }
             out.push_str(t);
             out.push_str("\r\n");
             keep_cont = t.ends_with('\\');
         }
     }
+    if kept == 0 {
+        return Some(false);
+    }
     out.push_str("\r\n");
-    let enc = if matches!(enc, util::Enc::Ansi) { util::Enc::Ansi } else { enc };
     let _ = util::write_text(file, &out, enc);
+    Some(true)
 }
 
 /// The key or value as `unsaved` names it: the text without the backslash that marks a key, in lower case.
@@ -518,7 +613,26 @@ pub fn export_to(ctx: &Ctx, key_or_value: &str, file: &str, view: View, note: &s
     let _ = std::fs::remove_file(&tmp);
     let mut done = sys::run_hidden_wait(&reg_exe(), &["export", &key, &tmp, "/y", view.reg_exe_flag()]) && util::is_file(&tmp);
     if done && !is_key {
-        filter_single_value(&tmp, &key, &value);
+        if util::too_big(&tmp) {
+            ctx.warn(&format!("reg export \"{}\": the exported key is bigger than 64 MB, so the whole key was saved, not only the value", spec));
+        } else {
+            match filter_single_value(&tmp, &key, &value) {
+                Some(true) => {}
+                // The value went away between the check and the export: there is nothing to save, and what was saved
+                // before stays.
+                Some(false) => {
+                    let _ = std::fs::remove_file(&tmp);
+                    ctx.warn(&format!("reg export \"{}\": the value is not in the export, so the previous file \"{}\" was kept", spec, file));
+                    return true;
+                }
+                // The exported file can't be read (another program holds it): what it holds is the whole key, not the
+                // value, so it is not put in the place of the file.
+                None => {
+                    ctx.log(&format!("reg export \"{}\": the exported file could not be read", spec));
+                    done = false;
+                }
+            }
+        }
     }
     if done {
         if let Err(e) = util::move_over(&tmp, file) {
@@ -546,12 +660,12 @@ pub fn export_to(ctx: &Ctx, key_or_value: &str, file: &str, view: View, note: &s
 pub fn regexport_kw(ctx: &mut Ctx, args: &[String]) {
     let file = settings_reg(ctx, arg(args, 1));
     let spec = ctx.expand_ex(arg(args, 0), true);
-    let view = view_of(ctx, arg(args, 2));
+    let view = view_of(ctx, arg(args, 2), &spec);
     export_to(ctx, &spec, &file, view, "");
 }
 
 pub fn regimport_kw(ctx: &mut Ctx, args: &[String]) {
     let file = settings_reg(ctx, arg(args, 0));
-    let view = view_of(ctx, arg(args, 1));
+    let view = view_of(ctx, arg(args, 1), &file);
     import_or_warn(ctx, &file, view);
 }

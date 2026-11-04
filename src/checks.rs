@@ -31,7 +31,9 @@ pub fn read_only_init(ctx: &mut Ctx) {
     use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_FLAG_DELETE_ON_CLOSE};
 
     // The drive is writable if a new file can be created in it. The file has a name of its own and the system
-    // deletes it when the handle closes, so nothing is left behind (not even after a crash).
+    // deletes it when the handle closes. A file that is still there was left by a run that was cut off (a power
+    // failure), and the same number was given to this process after the restart: it is deleted, which needs the same
+    // right as creating a file, so the result of that tells.
     let probe = format!("{}\\@#$readonly@#${}", ctx.script_dir.trim_end_matches('\\'), std::process::id());
     let opened = std::fs::OpenOptions::new()
         .access_mode(GENERIC_WRITE | DELETE)
@@ -41,13 +43,24 @@ pub fn read_only_init(ctx: &mut Ctx) {
         .open(&probe);
     let writable = match &opened {
         Ok(_) => true,
-        // a file with this name was already there: the folder accepts new files
-        Err(e) => matches!(e.raw_os_error(), Some(c) if c as u32 == ERROR_FILE_EXISTS || c as u32 == ERROR_ALREADY_EXISTS),
+        Err(e) => match e.raw_os_error() {
+            Some(c) if c as u32 == ERROR_FILE_EXISTS || c as u32 == ERROR_ALREADY_EXISTS => std::fs::remove_file(&probe).is_ok(),
+            _ => false,
+        },
     };
     drop(opened);
     ctx.is_readonly = !writable;
+    // The value is checked on every run, not only on a read only drive, so a mistake shows the first time it is tested.
+    let raw = general(ctx, "!readonly", "1");
+    let mut v = auto_num(&raw);
+    // DELIBERATE: 0 is accepted, with no message, as "do nothing" (like any value the switch does not act on), so that
+    // an old .ini that uses it keeps working. The help lists only the values that do something. The same for `!admin`
+    // and `!online` below. Text that is not a number is not accepted.
+    if !valid_option(&raw, |n| (-2..=2).contains(&n)) {
+        ctx.msg(&format!("The \"{}\" value of \"!readonly\" isn't valid. Use -2, -1, 1 or 2. The default (1) is used.", raw));
+        v = 1;
+    }
     if !writable {
-        let v = auto_num(&general(ctx, "!readonly", "1"));
         let exe = format!("{}.exe", ctx.exe_name);
         let text = format!(
             "\"{0}\" is running from a read only drive. Some applications may not work as expected in this mode. \"{0}\" will not be able to update configuration changes in files stored in a read only drive.",
@@ -183,7 +196,12 @@ pub fn java_full(ctx: &mut Ctx) {
         return;
     }
     let exit = req.contains('!');
+    let shown = req.clone();
     let req = req.replace('!', "");
+    if java_major(&req).is_none() {
+        ctx.msg(&format!("The \"{}\" value of \"!java\" isn't valid. Write the version, for example 17 or 17!. It is ignored.", shown));
+        return;
+    }
     let info = java_info(&[app_view(ctx)]);
     let ok = java_major(&req).map(|m| info.majors.contains(&m)).unwrap_or(false);
     if ok {
@@ -244,7 +262,7 @@ pub fn main_app_init(ctx: &mut Ctx) {
         ctx.msg("You MUST define a main application path in the \"GENERAL\" section.");
         exit_code(EXIT_CONFIG);
     }
-    let segs = util::split_args(&app);
+    let segs: Vec<String> = util::split_args(&app).iter().map(|s| s.trim().to_string()).collect();
     if segs.len() > 3 {
         ctx.msg("Check the main application path input data.");
         exit_code(EXIT_CONFIG);
@@ -336,10 +354,11 @@ fn hand_over(ctx: &Ctx, pipe: &str) -> ! {
 /// The first instance of this executable owns a named mutex and listens on a named pipe; the other instances
 /// find the mutex taken and, depending on `!multiple`, pass their command line through the pipe and leave.
 pub fn multiple_init(ctx: &mut Ctx) {
-    let mut multiple = auto_num(&general(ctx, "!multiple", "0"));
-    if !matches!(multiple, -1..=1) {
+    let raw = general(ctx, "!multiple", "0");
+    let mut multiple = auto_num(&raw);
+    if !valid_option(&raw, |n| (-1..=1).contains(&n)) {
         // NEW (gaP-rs): like "!os", a value that is not valid is said, and the default is used.
-        ctx.msg(&format!("The \"{}\" value of \"!multiple\" isn't valid. Use -1, 0 or 1. The default (0) is used.", multiple));
+        ctx.msg(&format!("The \"{}\" value of \"!multiple\" isn't valid. Use -1, 0 or 1. The default (0) is used.", raw));
         multiple = 0;
     }
     // The names depend on where the executable is and on what it contains.
@@ -370,6 +389,9 @@ pub fn multiple_init(ctx: &mut Ctx) {
 
 // ------------------------------------------------------------------ debugging
 
+/// DELIBERATE: `!debug` is not in the help or in the README, and its value is not checked or reported. It is a tool
+/// for support, to be asked for when something goes wrong, not an option for everyday use; anything other than 1 is
+/// off. Do not document it or add warnings for it.
 pub fn debug_log_init(ctx: &mut Ctx) {
     let mut on = auto_num(&general(ctx, "!debug", "0")) == 1;
     if !ctx.first_instance {
@@ -436,6 +458,11 @@ pub fn debug_log_init(ctx: &mut Ctx) {
 
 pub fn admin_init(ctx: &mut Ctx) {
     let v = general(ctx, "!admin", "");
+    // DELIBERATE: 0 is accepted as "do nothing" (see `read_only_init`).
+    if !v.is_empty() && !valid_option(&v, |n| (-1..=2).contains(&n)) {
+        ctx.msg(&format!("The \"{}\" value of \"!admin\" isn't valid. Use -1, 1 or 2. It is ignored.", v));
+        return;
+    }
     if !v.is_empty() {
         ctx.log(&format!("!admin {}: gaP {} with administrator rights", v, if sys::is_admin() { "runs" } else { "does not run" }));
     }
@@ -528,9 +555,14 @@ pub fn dotnet_init(ctx: &mut Ctx) {
         return;
     }
     let exit = req.contains('!');
+    let shown = req.clone();
     let req = req.replace('!', "");
+    if req.is_empty() || !req.chars().any(|c| c.is_ascii_digit()) || req.split('.').any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_digit())) {
+        ctx.msg(&format!("The \"{}\" value of \"!dotnet\" isn't valid. Write the version, for example 4.8 or 4.8!. It is ignored.", shown));
+        return;
+    }
     let inst = dotnet_versions(app_view(ctx));
-    let ok = inst.iter().any(|v| v == &req) || (req.starts_with("4.") && inst.iter().any(|v| v.starts_with("4.") && ver_ge(v, &req)));
+    let ok = inst.iter().any(|v| v == &req) || ((req == "4" || req.starts_with("4.")) && inst.iter().any(|v| v.starts_with("4.") && ver_ge(v, &req)));
     if ok {
         ctx.ok(&format!("!dotnet {}: found (installed: {})", req, inst.join(", ")));
     } else {
@@ -565,7 +597,22 @@ pub fn is_online() -> bool {
         });
     }
     drop(tx);
-    rx.iter().any(|ok| ok)
+    // A name that the resolver can't resolve may take the system a long time to give up, so the answer does not wait
+    // for the slowest: "online" at the first probe that works, "offline" when all failed or the time is over.
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match rx.recv_timeout(end.saturating_duration_since(std::time::Instant::now())) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(_) => return false,
+        }
+    }
+}
+
+/// An option that is a whole number in the range that `ok` accepts: `abc`, `1x`, the empty text and a number too big
+/// for `i64` are not (`auto_num` would read them as 0, and the option would be turned off without a word).
+fn valid_option(v: &str, ok: impl Fn(i64) -> bool) -> bool {
+    v.trim().parse::<i64>().is_ok_and(ok)
 }
 
 pub fn online_init(ctx: &mut Ctx) {
@@ -573,7 +620,15 @@ pub fn online_init(ctx: &mut Ctx) {
     if v.is_empty() {
         return;
     }
+    // DELIBERATE: 0 is accepted as "do nothing" (see `read_only_init`).
+    if valid_option(&v, |n| n == 0) {
+        return;
+    }
     let mode = auto_num(&v);
+    if !valid_option(&v, |n| matches!(n, -4..=-1 | 1 | 2)) {
+        ctx.msg(&format!("The \"{}\" value of \"!online\" isn't valid. Use -4, -3, -2, -1, 1 or 2. It is ignored.", v));
+        return;
+    }
     let online = is_online();
     ctx.log(&format!("!online {}: this computer is {}", mode, if online { "online" } else { "offline" }));
     let t = ctx.title.clone();

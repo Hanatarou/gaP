@@ -27,11 +27,13 @@ fn is_inside(child: &str, parent: &str) -> bool {
     c == p || c.starts_with(&format!("{}\\", p))
 }
 
-/// Drive root or ancestor of the launcher directory: removal blocked.
+/// The launcher itself, its configuration file, a drive root or an ancestor of the launcher directory: removal
+/// blocked.
 fn dangerous_delete(ctx: &Ctx, path: &str) -> bool {
     let p = util::trim_trailing_sep(path);
     let is_root = p.len() <= 3 && p.ends_with([':', '\\']);
-    is_root || is_inside(&ctx.script_dir, &p)
+    let np = norm_cmp(&p);
+    is_root || is_inside(&ctx.script_dir, &p) || np == norm_cmp(&ctx.ini_path) || np == norm_cmp(&ctx.script_full)
 }
 
 // --------------------------------------------------------------- copy / move
@@ -91,6 +93,10 @@ pub fn transfer_dir(ctx: &Ctx, src: &str, tgt: &str, mv: bool, ow: bool) -> bool
     let what = format!("dir {} \"{}\" -> \"{}\"{}", if mv { "move" } else { "copy" }, src, tgt, if ow { " (overwrite)" } else { "" });
     if !util::is_dir(src) {
         ctx.log(&format!("{}: the source does not exist, nothing to do", what));
+        return true;
+    }
+    if eq_ic(&norm_cmp(src), &norm_cmp(tgt)) {
+        ctx.log(&format!("{}: the source and the destination are the same folder, nothing to do", what));
         return true;
     }
     let ok = transfer_dir_run(ctx, src, tgt, mv, ow);
@@ -209,10 +215,33 @@ pub fn run_prog_fs(ctx: &Ctx, p: &Prog) {
     }
 }
 
-fn parse_transfer_flags(flag: &str) -> (bool, bool) {
-    let f = if is_null(flag) || flag.is_empty() { "copy, overwrite" } else { flag };
-    let mv = util::contains_ic(f, "move");
-    let ow = !util::contains_ic(f, "no overwrite");
+/// The flag of a copy or a move: the words `copy`, `move`, `overwrite` and `no overwrite`, separated by commas,
+/// spaces or hyphens (`no-overwrite` is read as `no overwrite`). The default is `copy, overwrite`. A word that is
+/// none of them is reported and left out, so a typo does not change what the item does without a word about it.
+fn parse_transfer_flags(ctx: &Ctx, flag: &str) -> (bool, bool) {
+    let (mut mv, mut ow) = (false, true);
+    if is_null(flag) {
+        return (mv, ow);
+    }
+    let lower = flag.to_lowercase();
+    let mut words = lower.split(|c: char| c.is_whitespace() || c == ',' || c == '-').filter(|w| !w.is_empty());
+    while let Some(w) = words.next() {
+        match w {
+            "copy" => mv = false,
+            "move" => mv = true,
+            "overwrite" => ow = true,
+            "nooverwrite" => ow = false,
+            "no" => match words.next() {
+                Some("overwrite") => ow = false,
+                _ => ctx.warn(&format!("flag \"{}\": \"no\" has to be followed by \"overwrite\"; it was ignored", flag.trim())),
+            },
+            other => ctx.warn(&format!(
+                "flag \"{}\": \"{}\" is not valid, use copy, move, overwrite or no overwrite; it was ignored",
+                flag.trim(),
+                other
+            )),
+        }
+    }
     (mv, ow)
 }
 
@@ -237,7 +266,7 @@ pub fn ltr_dir(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let src = if is_null(&a) { default_settings_dir(ctx) } else { full(ctx, &a) };
     let tgt = if is_null(&b) { default_settings_dir(ctx) } else { full(ctx, &b) };
     let flag = ctx.expand(arg(args, 2));
-    let (mv, ow) = parse_transfer_flags(&flag);
+    let (mv, ow) = parse_transfer_flags(ctx, &flag);
     transfer_dir(ctx, &util::trim_trailing_sep(&src), &util::trim_trailing_sep(&tgt), mv, ow);
 }
 
@@ -272,7 +301,7 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
     let src = full(ctx, &a);
     let tgt = if is_null(&b) { ctx.script_dir.clone() } else { full(ctx, &b) };
     let flag = ctx.expand(arg(args, 2));
-    let (mv, ow) = parse_transfer_flags(&flag);
+    let (mv, ow) = parse_transfer_flags(ctx, &flag);
     let tgt = resolve_file_target(ctx, &src, &tgt);
     transfer_file(ctx, &src, &tgt, mv, ow);
 }
@@ -283,8 +312,27 @@ pub fn ltr_file(ctx: &mut Ctx, args: &[String], rtl: bool) {
 fn drop_failed_backup(ctx: &Ctx, src: &str, backup: &str) {
     if util::is_file(src) && util::exists(backup) {
         let failed = util::delete_files(backup);
-        ctx.log(&format!("the unfinished backup \"{}\" was deleted{}", backup, if failed > 0 { " (it could not)" } else { "" }));
+        if failed > 0 {
+            ctx.log(&format!("the unfinished backup \"{}\" could not be deleted ({} file(s) kept)", backup, failed));
+        } else {
+            ctx.log(&format!("the unfinished backup \"{}\" was deleted", backup));
+        }
     }
+}
+
+/// An earlier run that did not finish left its original data in `backup`: copying over it would lose it. Used when the
+/// item runs, for the items that the check at the start could not look at (they ask the user for a folder, a file, a
+/// text or a password). The item is skipped and nothing of it is changed.
+fn backup_busy(ctx: &Ctx, what: &str, backup: &str) -> bool {
+    if !occupied(backup) {
+        return false;
+    }
+    ctx.err(&format!("leftover backup \"{}\"", backup));
+    ctx.msg(&format!(
+        "An earlier run did not finish and left the original {} in \"{}\". This item was skipped and nothing was changed. Restore or delete it and run again.",
+        what, backup
+    ));
+    true
 }
 
 /// An item whose original data could not be saved is skipped: nothing was changed.
@@ -298,6 +346,9 @@ pub fn dir_kw(ctx: &mut Ctx, args: &[String]) {
     let tgt = if is_null(arg(args, 1)) { default_settings_dir(ctx) } else { full(ctx, arg(args, 1)) };
     let tgt = util::trim_trailing_sep(&tgt);
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "folder", &backup) {
+        return;
+    }
     if !transfer_dir(ctx, &src, &backup, true, true) {
         not_saved(ctx, "folder", &src);
         return;
@@ -317,6 +368,9 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
         resolve_file_target(ctx, &src, &t)
     };
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "file", &backup) {
+        return;
+    }
     if !transfer_file(ctx, &src, &backup, true, true) {
         drop_failed_backup(ctx, &src, &backup);
         not_saved(ctx, "file", &src);
@@ -331,6 +385,9 @@ pub fn file_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
     let src = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "folder", &backup) {
+        return;
+    }
     if !transfer_dir(ctx, &src, &backup, true, true) {
         not_saved(ctx, "folder", &src);
         return;
@@ -342,6 +399,9 @@ pub fn pdirp_kw(ctx: &mut Ctx, args: &[String]) {
 pub fn pfilep_kw(ctx: &mut Ctx, args: &[String]) {
     let src = full(ctx, arg(args, 0));
     let backup = format!("{}_backup", src);
+    if backup_busy(ctx, "file", &backup) {
+        return;
+    }
     if !transfer_file(ctx, &src, &backup, true, true) {
         drop_failed_backup(ctx, &src, &backup);
         not_saved(ctx, "file", &src);
@@ -372,9 +432,13 @@ pub fn plus_dir(ctx: &mut Ctx, args: &[String]) {
 
 pub fn plus_file(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
-    let mut flag = ctx.expand(arg(args, 1));
+    let mut flag = ctx.expand(arg(args, 1)).replace('-', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     if is_null(&flag) || flag.is_empty() {
         flag = "overwrite".into();
+    }
+    if !eq_ic(&flag, "overwrite") && !eq_ic(&flag, "no overwrite") {
+        ctx.warn(&format!("file create \"{}\": \"{}\" is not valid, use overwrite or no overwrite; nothing was done", f, flag));
+        return;
     }
     let mut text = ctx.expand(arg(args, 2));
     if is_null(&text) {
@@ -397,17 +461,26 @@ pub fn plus_file(ctx: &mut Ctx, args: &[String]) {
 
 pub fn minus_dir(ctx: &mut Ctx, args: &[String]) {
     let d = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
-    let flag = ctx.expand(arg(args, 1));
+    let flag = ctx.expand(arg(args, 1)).trim().to_string();
+    // No flag deletes the whole folder; a flag that is not "ifempty" is a mistake, and a mistake must not delete a tree.
+    let if_empty = eq_ic(&flag, "ifempty");
+    if !if_empty && !flag.is_empty() && !is_null(&flag) {
+        ctx.warn(&format!("dir delete \"{}\": \"{}\" is not valid, use ifempty or leave it empty; nothing was deleted", d, flag));
+        return;
+    }
     let (par, name) = util::split_parent(&d);
     let par = if par.len() == 2 { format!("{}\\", par) } else { par };
     for m in util::list_dir(&par, &name, Kind::Dirs) {
         if dangerous_delete(ctx, &m) {
-            ctx.msg(&format!("Refusing to delete \"{}\" (drive root or a parent of the launcher directory).", m));
+            ctx.msg(&format!("Refusing to delete \"{}\" (the launcher, its configuration file, a drive root or a parent of the launcher directory).", m));
             continue;
         }
-        if eq_ic(&flag, "ifempty") {
-            util::remove_dir_if_empty(&m);
-            ctx.log(&format!("dir delete \"{}\" (only if empty)", m));
+        if if_empty {
+            if util::remove_dir_if_empty(&m) {
+                ctx.ok(&format!("dir delete \"{}\" (only if empty)", m));
+            } else {
+                ctx.log(&format!("dir delete \"{}\": not empty, kept", m));
+            }
         } else if util::remove_dir_recursive(&m) {
             ctx.ok(&format!("dir delete \"{}\"", m));
         } else {
@@ -418,7 +491,16 @@ pub fn minus_dir(ctx: &mut Ctx, args: &[String]) {
 
 pub fn minus_file(ctx: &mut Ctx, args: &[String]) {
     let f = full(ctx, arg(args, 0));
-    let failed = util::delete_files(&f);
+    let (par, name) = util::split_parent(&f);
+    let par = if par.len() == 2 { format!("{}\\", par) } else { par };
+    let mut failed = 0;
+    for m in util::list_dir(&par, &name, Kind::Files) {
+        if dangerous_delete(ctx, &m) {
+            ctx.msg(&format!("Refusing to delete \"{}\" (the launcher, its configuration file, a drive root or a parent of the launcher directory).", m));
+            continue;
+        }
+        failed += util::delete_files(&m);
+    }
     if failed > 0 {
         ctx.err(&format!("delete {} file(s) of \"{}\"", failed, f));
     } else {
@@ -431,9 +513,21 @@ pub fn minus_file(ctx: &mut Ctx, args: &[String]) {
 pub fn attributes(ctx: &mut Ctx, args: &[String]) {
     let path = util::trim_trailing_sep(&full(ctx, arg(args, 0)));
     let vals = ctx.expand(arg(args, 1)).replace(' ', "");
-    let mut list: Vec<String> = vals.split(',').map(|s| s.to_lowercase()).collect();
-    if list.len() == 1 && (list[0] == "null" || list[0].is_empty()) {
-        list[0] = "normal".into();
+    // "NULL" or nothing: no letter below matches, so no attribute is set (the file becomes "normal")
+    // Each element is one letter (C, A, R, S, H, O, T) or the whole word; anything else is reported and left out.
+    const WORDS: [&str; 9] = ["archive", "compressed", "hidden", "normal", "offline", "readonly", "system", "temporary", "null"];
+    let mut list: Vec<String> = Vec::new();
+    let all: Vec<String> = vals.split(',').map(|s| s.to_lowercase()).collect();
+    for v in all.iter() {
+        let one_letter = v.len() == 1 && "carshot".contains(v.as_str());
+        if one_letter || WORDS.contains(&v.as_str()) {
+            list.push(v.clone());
+        } else if !(v.is_empty() && all.len() == 1) {
+            ctx.warn(&format!(
+                "attributes \"{}\": \"{}\" is not valid, use C, A, R, S, H, O, T (or the whole word) or NULL; it was ignored",
+                path, v
+            ));
+        }
     }
     if !util::exists(&path) {
         return;
@@ -451,7 +545,9 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
             | FILE_ATTRIBUTE_OFFLINE
             | FILE_ATTRIBUTE_TEMPORARY;
         // "-RASHNOT": starts by clearing everything (also makes the file writable)
-        SetFileAttributesW(wp.as_ptr(), cur & !managed);
+        if SetFileAttributesW(wp.as_ptr(), cur & !managed) == 0 {
+            ctx.log_err(&format!("attributes \"{}\": clear the attributes", path), &std::io::Error::last_os_error());
+        }
         let mut bits = 0u32;
         let mut compress = false;
         for v in &list {
@@ -486,7 +582,9 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
         } else {
             fin &= !FILE_ATTRIBUTE_NORMAL;
         }
-        SetFileAttributesW(wp.as_ptr(), fin);
+        if SetFileAttributesW(wp.as_ptr(), fin) == 0 {
+            ctx.log_err(&format!("attributes \"{}\": set the attributes", path), &std::io::Error::last_os_error());
+        }
     }
 }
 
@@ -501,11 +599,12 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
         util::path_full(&e, &ctx.script_dir)
     };
     let f = ctx.io_path(&logical);
-    let mut show = ctx.expand(arg(args, 1));
+    let mut show = ctx.expand(arg(args, 1)).trim().to_string();
     if is_null(&show) || show.is_empty() {
         show = "hide".into();
     }
     if !util::exists(&f) {
+        ctx.warn(&format!("batch \"{}\": the file does not exist, nothing to run", logical));
         return;
     }
     // The working directory is the folder as written: cmd.exe resolves it itself and
@@ -521,6 +620,7 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
     } else if eq_ic(&show, "show") {
         c.raw_arg(format!("/K \"\"{}\"\"", logical));
     } else {
+        ctx.warn(&format!("batch \"{}\": \"{}\" is not valid, use hide or show; nothing was run", logical, show));
         return;
     }
     if let Err(e) = c.status() {
@@ -576,20 +676,30 @@ pub fn date(ctx: &mut Ctx, args: &[String]) {
     if is_null(&d) || eq_ic(&d, "now") || d.is_empty() {
         d = local_stamp(SystemTime::now());
     }
-    let mut kind = ctx.expand(arg(args, 2));
+    let mut kind = ctx.expand(arg(args, 2)).trim().to_string();
     if is_null(&kind) || kind.is_empty() {
         kind = "modified".into();
     }
-    if !util::exists(&f) {
+    if !["modified", "created", "accessed"].iter().any(|k| eq_ic(&kind, k)) {
+        ctx.warn(&format!("date \"{}\": \"{}\" is not valid, use modified, created or accessed; nothing was changed", f, kind));
         return;
     }
-    let Some(local) = parse_stamp(&d) else { return };
+    if !util::exists(&f) {
+        ctx.warn(&format!("date \"{}\": the file does not exist, nothing to change", f));
+        return;
+    }
+    let Some(local) = parse_stamp(&d) else {
+        ctx.warn(&format!("date \"{}\": \"{}\" is not a valid date and time, nothing was changed", f, raw));
+        return;
+    };
     unsafe {
         let (mut utc, mut ft): (SYSTEMTIME, FILETIME) = std::mem::zeroed();
         if TzSpecificLocalTimeToSystemTime(null(), &local, &mut utc) == 0 {
+            ctx.log_err(&format!("date \"{}\": convert the local time to UTC", f), &std::io::Error::last_os_error());
             return;
         }
         if SystemTimeToFileTime(&utc, &mut ft) == 0 {
+            ctx.log_err(&format!("date \"{}\": convert the time to a file time", f), &std::io::Error::last_os_error());
             return;
         }
         let wp = util::w(&f);
@@ -598,14 +708,17 @@ pub fn date(ctx: &mut Ctx, args: &[String]) {
             OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, null_mut(),
         );
         if h == INVALID_HANDLE_VALUE {
+            ctx.log_err(&format!("date \"{}\": open the file", f), &std::io::Error::last_os_error());
             return;
         }
-        let (c, a, m): (*const FILETIME, *const FILETIME, *const FILETIME) = match kind.to_lowercase().as_str() {
+        let (c, a, m): (*const FILETIME, *const FILETIME, *const FILETIME) = match kind.trim().to_lowercase().as_str() {
             "created" => (&ft, null(), null()),
             "accessed" => (null(), &ft, null()),
             _ => (null(), null(), &ft),
         };
-        SetFileTime(h, c, a, m);
+        if SetFileTime(h, c, a, m) == 0 {
+            ctx.log_err(&format!("date \"{}\": set the time", f), &std::io::Error::last_os_error());
+        }
         CloseHandle(h);
     }
 }
@@ -618,7 +731,18 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
     let typ = ctx.expand(arg(args, 2));
     let order = ctx.expand(arg(args, 3));
     let param = ctx.expand(arg(args, 4)).to_lowercase();
-    let number = ctx.expand_num(arg(args, 5)).max(0) as usize;
+    // A number of items that is not a whole number (or is negative) must not read as 0: that would delete everything.
+    let number_text = ctx.expand(arg(args, 5));
+    let number = match number_text.trim().parse::<i64>() {
+        Ok(n) if n >= 0 => n as usize,
+        _ => {
+            ctx.msg(&format!(
+                "keeponly: \"{}\" is not valid as the number of items to keep. Use a whole number, 0 or more. Nothing was deleted.",
+                number_text.trim()
+            ));
+            return;
+        }
+    };
     // The folder as gaP resolved it: a relative path is resolved against the folder of gaP.exe, and the log is where
     // to see which folder that was.
     ctx.log(&format!("keeponly: \"{}\" resolved to \"{}\"", arg(args, 0), path));
@@ -685,6 +809,10 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
     });
     let mut failed = Vec::new();
     for (_, _, p) in keyed.into_iter().skip(number) {
+        if dangerous_delete(ctx, &p) {
+            ctx.msg(&format!("Refusing to delete \"{}\" (the launcher, its configuration file, a drive root or a parent of the launcher directory).", p));
+            continue;
+        }
         let ok = match kind {
             Kind::Files => util::delete_files(&p) == 0,
             _ => util::remove_dir_recursive(&p),

@@ -75,6 +75,11 @@ const SPECS: &[Spec] = &[
     Spec { name: "uservar", min: 2, max: 2, allowed: Both },
 ];
 
+/// Keywords whose segments are text that the user wrote on purpose, spaces included. The segments of the others are
+/// names, paths and flags, so a space around them (`a ::  b`) is a mistake and is not kept.
+const FREE_TEXT: &[&str] =
+    &["gstringreplace", "replace", "replaceline", "plusfile", "plusregvalue", "giniwrite", "message", "clip", "uservar", "envvar"];
+
 const RUN_FIRST_BEFORE: &[&str] = &["uservar", "envvar", "giniread", "gstringreplace"];
 const RUN_FIRST_AFTER: &[&str] = &["nowait", "quit", "uservar", "envvar", "giniread", "gstringreplace"];
 
@@ -113,7 +118,12 @@ pub fn init_section(ctx: &mut Ctx, sec: Section) -> Vec<TaskKind> {
         match normalize(&k, ctx.os_arch) {
             None => out.push(TaskKind::Done),
             Some(kw) => {
-                let args = if v.is_empty() { Vec::new() } else { util::split_args(&v) };
+                let mut args = if v.is_empty() { Vec::new() } else { util::split_args(&v) };
+                if !FREE_TEXT.contains(&kw.as_str()) {
+                    for a in &mut args {
+                        *a = a.trim().to_string();
+                    }
+                }
                 out.push(TaskKind::User { kw, args, raw_key: k, raw_val: v });
             }
         }

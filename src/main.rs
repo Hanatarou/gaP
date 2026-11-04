@@ -149,6 +149,17 @@ fn start_failed(ctx: &Ctx, cl: &str, e: u32) {
     ));
 }
 
+/// The command lines that other instances sent and gaP did not start yet.
+fn take_commands(ctx: &Ctx) -> Vec<String> {
+    let mut received = Vec::new();
+    if let Some(server) = &ctx.ipc {
+        while let Some(cmd) = server.try_recv() {
+            received.push(cmd);
+        }
+    }
+    received
+}
+
 /// `RunMainAppProc`: starts the main application and waits for it. While it runs, command lines sent by other
 /// instances (`!multiple`) start it again.
 fn run_main_app(ctx: &mut Ctx) {
@@ -161,19 +172,22 @@ fn run_main_app(ctx: &mut Ctx) {
     loop {
         let running = sys::running_children();
         if running.is_empty() {
-            break;
+            // A command line sent by another instance just before the last process ended was accepted, so it runs.
+            let late = take_commands(ctx);
+            if late.is_empty() {
+                break;
+            }
+            for cmd in late {
+                ctx.cmd_raw = cmd;
+                start_main(ctx);
+            }
+            continue;
         }
         // Sleeps until a process ends or another instance sends a command line. A single wait takes up to 63
         // processes: with more, it also wakes up twice a second to look at the rest.
         let event = ctx.ipc.as_ref().map(|s| s.event());
         sys::wait_any(&running, event, if running.len() > 63 { 500 } else { sys::FOREVER });
-        let mut received = Vec::new();
-        if let Some(server) = &ctx.ipc {
-            while let Some(cmd) = server.try_recv() {
-                received.push(cmd);
-            }
-        }
-        for cmd in received {
+        for cmd in take_commands(ctx) {
             ctx.cmd_raw = cmd;
             start_main(ctx);
         }
