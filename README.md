@@ -62,10 +62,10 @@ There is no installer. Download the zip of your architecture from the [releases]
 
 | Download | For |
 |---|---|
-| `gaP-v2.1.3.0-windows-x64.zip` | 64-bit Windows |
-| `gaP-v2.1.3.0-windows-x86.zip` | 32-bit and 64-bit Windows |
+| `gaP-v2.1.4.0-windows-x64.zip` | 64-bit Windows |
+| `gaP-v2.1.4.0-windows-x86.zip` | 32-bit and 64-bit Windows |
 
-(`v2.1.3.0` is the version; each zip has its `gaP-v2.1.3.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`.
+(`v2.1.4.0` is the version; each zip has its `gaP-v2.1.4.0-windows-x64.exe.sha256.txt` beside it, outside the zip.) Both builds do the same thing and read the same `.ini`.
 
 ### x86 and x64
 
@@ -180,7 +180,7 @@ cargo build --release
 rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc
 ```
 
-**The released programs** are the smallest ones: profile `release` (size-optimised, LTO, `panic = "abort"`, stripped) built with a nightly Rust that rebuilds the standard library for size and drops the panic machinery (`-Cpanic=immediate-abort`). `.github/workflows/release.yml` builds the 64-bit and the 32-bit program, runs `clippy` and the tests for both, and attaches the zips and their `.exe.sha256.txt` to the release; it refuses a release whose tag is not the version of `Cargo.toml` and `res/resources.rc` (`v2.1.3.0`). The nightly is not pinned: every build uses the newest one. To build them yourself, install the nightly once:
+**The released programs** are the smallest ones: profile `release` (size-optimised, LTO, `panic = "abort"`, stripped) built with a nightly Rust that rebuilds the standard library for size and drops the panic machinery (`-Cpanic=immediate-abort`). `.github/workflows/release.yml` builds the 64-bit and the 32-bit program, runs `clippy` and the tests for both, and attaches the zips and their `.exe.sha256.txt` to the release; it refuses a release whose tag is not the version of `Cargo.toml` and `res/resources.rc` (`v2.1.4.0`). The nightly is not pinned: every build uses the newest one. To build them yourself, install the nightly once:
 
 ```
 rustup toolchain install nightly -c rust-src
@@ -218,11 +218,11 @@ Rename the result to `gaP.exe` (or to the name of your launcher).
 cargo test
 ```
 
-The unit tests cover, among other things, the text encryption (round trip and the SHA-1 test vector), the macro parser (the `{VAR}` escapes and the detection of an undefined `%VAR%`), the building of registry values, the values of `!os` and the rewriting of `System32` paths for the architecture of the application. They do not replace trying a launcher on a real application, nor running the same `.ini` with the x86 and the x64 build on a 64-bit Windows.
+The unit tests cover, among other things, the text encryption (round trip and fixed encrypted texts that the CryptoAPI of Windows must reproduce byte by byte) and SHA-1 (the RFC 3174 test vectors), the macro parser (the `{VAR}` escapes and the detection of an undefined `%VAR%`), the building of registry values, the values of `!os` and the rewriting of `System32` paths for the architecture of the application. They do not replace trying a launcher on a real application, nor running the same `.ini` with the x86 and the x64 build on a 64-bit Windows.
 
 ### Dependencies
 
-[`windows-sys`](https://crates.io/crates/windows-sys) for the Win32 API, the [RustCrypto](https://github.com/RustCrypto) crates `aes`, `cbc`, `cipher`, `md-5` and `sha1` for the text encryption and SHA-1, and [`embed-resource`](https://crates.io/crates/embed-resource) (build only) for the icon, version information and manifest. There is no `Cargo.lock` in the repository on purpose: every build takes the newest versions of the crates that `Cargo.toml` allows.
+[`windows-sys`](https://crates.io/crates/windows-sys) for the Win32 API (the text encryption is done by the CryptoAPI of Windows, as in the AutoIt program), [`miniz_oxide`](https://crates.io/crates/miniz_oxide) for the texts that the program carries (the help, the template of the `.ini` and the license are stored compressed: it compresses them at build time and inflates them when they are needed), and [`embed-resource`](https://crates.io/crates/embed-resource) (build only) for the icon, version information and manifest. There is no `Cargo.lock` in the repository on purpose: every build takes the newest versions of the crates that `Cargo.toml` allows.
 
 ## ⚠️ Warning
 

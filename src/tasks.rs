@@ -1,6 +1,7 @@
 //! Engine of the BEFORE / AFTER sections: .ini reading, x86/x64 filter,
 //! keyword normalization, section/parameter validation and execution.
 
+use crate::util::WinCase;
 use crate::ctx::{error_count, exit_code, warning_count, Ctx, Prog, Section, TaskKind, EXIT_BACKUP};
 use crate::{clean, ops_fs, ops_misc, ops_reg, util};
 
@@ -95,7 +96,7 @@ fn normalize(raw_key: &str, os_arch: &str) -> Option<String> {
         (_, false, false) => {}
         _ => return None,
     }
-    let k = k.trim().to_lowercase();
+    let k = k.trim().lower();
     let k = k.replace(['(', ')'], "p").replace("->", "ltr").replace("<-", "rtl").replace('-', "minus").replace('+', "plus");
     Some(match k.as_str() {
         "stringreplace" => "gstringreplace".to_string(),
@@ -146,8 +147,13 @@ fn run_prog(ctx: &mut Ctx, p: &Prog) {
     }
 }
 
-fn view_name(v: &crate::reg::View) -> String {
-    format!("{:?}", v).to_lowercase()
+fn view_name(v: &crate::reg::View) -> &'static str {
+    use crate::reg::View;
+    match v {
+        View::Native => "native",
+        View::X86 => "x86",
+        View::X64 => "x64",
+    }
 }
 
 /// An automatic task as the debug log shows it.

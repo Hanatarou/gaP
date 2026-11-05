@@ -1,5 +1,5 @@
 //! gaP: great! another Portabilizer — Rust port of the AutoIt program
-//! (v2.1.3.0; the last AutoIt version was 1.1.5.0).
+//! (v2.1.4.0; the last AutoIt version was 1.1.5.0).
 #![windows_subsystem = "windows"]
 #![allow(clippy::too_many_arguments)]
 
@@ -7,6 +7,7 @@ mod checks;
 mod clean;
 mod crypto;
 mod ctx;
+mod embedded;
 mod gui;
 mod ini;
 mod ipc;
@@ -23,9 +24,6 @@ mod vars;
 use ctx::{exit_code, exit_now, Ctx, Section, EXIT_CANCELLED, EXIT_CONFIG};
 use util::eq_ic;
 
-static HELP_TXT: &[u8] = include_bytes!("../res/gaP_Help.txt");
-static INI_TEMPLATE: &[u8] = include_bytes!("../res/gaP.ini");
-
 fn main() {
     let mut ctx = Ctx::new();
     let cmd = ctx.cmd_raw.clone();
@@ -39,7 +37,7 @@ fn main() {
     } else if eq_ic(&cmd, "-help") {
         // FileInstall(..., flag 0): does not overwrite.
         let p = format!("{}\\gaP_Help.txt", ctx.script_dir.trim_end_matches('\\'));
-        if !std::path::Path::new(&p).exists() && std::fs::write(&p, HELP_TXT).is_err() {
+        if !std::path::Path::new(&p).exists() && !embedded::help().is_some_and(|t| std::fs::write(&p, t).is_ok()) {
             ctx.msg(&format!("The help file \"{}\" could not be created.", p));
         }
         clean::clean_all(&ctx.script_full, None);
@@ -83,9 +81,9 @@ fn launcher(ctx: &mut Ctx) {
         } else {
             if ui::ok_cancel(&ctx.title, "No \".ini\" file found. Do you want to create a new one?") {
                 // IMPROVEMENT: the original ignored the failure to create the .ini.
-                match std::fs::write(&ctx.ini_path, INI_TEMPLATE) {
-                    Ok(()) => code = 0,
-                    Err(_) => ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name)),
+                match embedded::ini_template().map(|t| std::fs::write(&ctx.ini_path, t)) {
+                    Some(Ok(())) => code = 0,
+                    _ => ctx.msg(&format!("The \"{}.ini\" file could not be created.", ctx.exe_name)),
                 }
             } else {
                 code = EXIT_CANCELLED;

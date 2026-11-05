@@ -93,7 +93,7 @@ fn crypt_change() {
             // Decrypt
             crypto::decrypt(&input, &pass).unwrap_or_default()
         } else {
-            crypto::encrypt(&input, &pass)
+            crypto::encrypt(&input, &pass).unwrap_or_default()
         }
     } else {
         String::new()
@@ -196,16 +196,18 @@ pub fn run_crypt(script_full: &str) -> ! {
 // --------------------------------------------------------------- -license
 
 /// The LICENSE file of the repository, embedded in the program: "Save license" writes the text as it is on GitHub.
-const LICENSE_FILE: &str = include_str!("../LICENSE");
+fn license_file() -> String {
+    crate::embedded::license().unwrap_or_default()
+}
 
 /// The license as it is saved: the lines of the LICENSE file, with Windows line ends.
 pub fn license_text() -> String {
-    format!("{}\r\n", LICENSE_FILE.replace("\r\n", "\n").trim_end().replace('\n', "\r\n"))
+    format!("{}\r\n", license_file().replace("\r\n", "\n").trim_end().replace('\n', "\r\n"))
 }
 
 /// The license as it is shown in the window: one line per paragraph (the control wraps it to the width of the window).
 fn license_display() -> String {
-    LICENSE_FILE
+    license_file()
         .replace("\r\n", "\n")
         .trim_end()
         .split("\n\n")

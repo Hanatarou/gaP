@@ -11,7 +11,8 @@ use std::os::windows::fs::FileTypeExt;
 use std::path::Path;
 
 use windows_sys::Win32::Globalization::{
-    CompareStringOrdinal, FindStringOrdinal, MultiByteToWideChar, WideCharToMultiByte, CSTR_EQUAL, FIND_FROMSTART,
+    CompareStringOrdinal, FindStringOrdinal, LCMapStringEx, MultiByteToWideChar, WideCharToMultiByte, CSTR_EQUAL, FIND_FROMSTART,
+    LCMAP_LOWERCASE, LCMAP_UPPERCASE, LOCALE_NAME_INVARIANT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileAttributesW, MoveFileExW, ReplaceFileW, SetFileAttributesW, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_HIDDEN,
@@ -48,6 +49,50 @@ pub fn from_w(buf: &[u16]) -> String {
 
 fn utf16(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
+}
+
+/// Case conversion done by Windows instead of by the Unicode tables of the standard library, which would be in the
+/// program only for this. It follows the rules of the file system (the same simple mapping NTFS uses, the same for
+/// every user whatever the language of the system), so a name compares here as the system compares it. ASCII, which
+/// is nearly everything gaP reads (keywords, flags, paths), is converted directly.
+pub trait WinCase {
+    fn lower(&self) -> String;
+    fn upper(&self) -> String;
+}
+
+fn map_case(s: &str, flag: u32) -> String {
+    let src = utf16(s);
+    let mut dst = vec![0u16; src.len()];
+    let n = unsafe {
+        LCMapStringEx(
+            LOCALE_NAME_INVARIANT, flag, src.as_ptr(), src.len() as i32, dst.as_mut_ptr(), dst.len() as i32, std::ptr::null(),
+            std::ptr::null(), 0,
+        )
+    };
+    // The simple mapping keeps the length; if Windows does not do it, the text stays as it is.
+    if n as usize == src.len() {
+        String::from_utf16_lossy(&dst)
+    } else {
+        s.to_string()
+    }
+}
+
+impl WinCase for str {
+    fn lower(&self) -> String {
+        if self.is_ascii() {
+            self.to_ascii_lowercase()
+        } else {
+            map_case(self, LCMAP_LOWERCASE)
+        }
+    }
+
+    fn upper(&self) -> String {
+        if self.is_ascii() {
+            self.to_ascii_uppercase()
+        } else {
+            map_case(self, LCMAP_UPPERCASE)
+        }
+    }
 }
 
 /// Case-insensitive comparison (the AutoIt `=` between strings). ASCII is compared directly; any other
@@ -245,7 +290,10 @@ pub fn has_wildcard(s: &str) -> bool {
 }
 
 fn lc(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
+    if c.is_ascii() {
+        return c.to_ascii_lowercase();
+    }
+    c.to_string().lower().chars().next().unwrap_or(c)
 }
 
 /// Windows-style wildcard (`*` and `?`), case-insensitive.
@@ -315,7 +363,7 @@ fn scan_dir(dir: &str, filter: &str, kind: Kind, stop_at_first: bool) -> Vec<Str
 /// `filter` accepts several patterns separated by `;`.
 pub fn list_dir(dir: &str, filter: &str, kind: Kind) -> Vec<String> {
     let mut out = scan_dir(dir, filter, kind, false);
-    out.sort_by_cached_key(|s| s.to_lowercase());
+    out.sort_by_cached_key(|s| s.lower());
     out
 }
 
@@ -814,7 +862,7 @@ pub fn rewrite_system32(p: &str, windir: &str, os: &str, gap: &str, app: &str) -
     if !(rest.is_empty() || rest.starts_with('\\')) {
         return p.to_string();
     }
-    let sub = rest.trim_start_matches('\\').to_lowercase();
+    let sub = rest.trim_start_matches('\\').lower();
     if WOW64_NOT_REDIRECTED.iter().any(|d| sub == *d || sub.starts_with(&format!("{}\\", d))) {
         return p.to_string();
     }
@@ -1074,5 +1122,39 @@ mod tests {
         assert_eq!(rw(r"C:\Windows\System32\spool", W, "x64", "x64", "x86"), r"C:\Windows\System32\spool");
         // ...but their neighbours are
         assert_eq!(rw(r"C:\Windows\System32\drivers\x.sys", W, "x64", "x64", "x86"), r"C:\Windows\SysWOW64\drivers\x.sys");
+    }
+}
+
+#[cfg(test)]
+mod case_tests {
+    use super::*;
+
+    #[test]
+    fn ascii_is_converted_as_before() {
+        assert_eq!(WinCase::lower("C:\\Program Files\\HKCU_Key.TXT"), "c:\\program files\\hkcu_key.txt");
+        assert_eq!(WinCase::upper("hkcu\\Software"), "HKCU\\SOFTWARE");
+        assert_eq!(WinCase::lower(""), "");
+    }
+
+    #[test]
+    fn accented_letters_follow_the_file_system() {
+        assert_eq!(WinCase::lower("AÇÃO ÀÉÎÕÜ Ñ"), "ação àéîõü ñ");
+        assert_eq!(WinCase::upper("ação àéîõü ñ"), "AÇÃO ÀÉÎÕÜ Ñ");
+        assert_eq!(WinCase::lower("ЖИВ Ελλάς"), "жив ελλάς");
+        // the text keeps its length: a name is never cut or grown by the conversion
+        assert_eq!(WinCase::lower("İ").chars().count(), 1);
+        assert_eq!(WinCase::upper("ß").chars().count(), 1);
+    }
+
+    #[test]
+    fn the_same_text_converts_the_same_whatever_the_case_it_came_in() {
+        assert_eq!(WinCase::lower("Ação.TXT"), WinCase::lower("aÇÃO.txt"));
+        assert!(eq_ic("Ação.TXT", "aÇÃO.txt"));
+    }
+
+    #[test]
+    fn the_wildcard_ignores_the_case_of_accented_letters() {
+        assert!(wildcard_match("*ÇÃO.t?t", "ação.TXT"));
+        assert!(!wildcard_match("*ÇÃO.t?t", "acao.TXT"));
     }
 }

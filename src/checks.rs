@@ -2,6 +2,7 @@
 //! and initial checks (read-only, single instance, administrator,
 //! .NET, Java, Internet, OS, debugging).
 
+use crate::util::WinCase;
 use std::path::Path;
 
 use crate::clean;
@@ -673,7 +674,7 @@ fn os_level(major: u32, minor: u32, build: u32) -> (u32, u32, u32) {
 
 /// Value of `!os` (XP, Vista, 7, 8, 8.1, 10, 11) as an `os_level`.
 fn os_threshold(name: &str) -> Option<(u32, u32, u32)> {
-    match name.to_lowercase().as_str() {
+    match name.lower().as_str() {
         "xp" => Some((5, 1, 0)),
         "vista" => Some((6, 0, 0)),
         "7" => Some((6, 1, 0)),
@@ -704,7 +705,7 @@ pub fn os_init(ctx: &mut Ctx) {
         ));
         return;
     };
-    let pretty = match name.to_lowercase().as_str() {
+    let pretty = match name.lower().as_str() {
         "xp" => "XP",
         "vista" => "Vista",
         n => n,

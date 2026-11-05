@@ -2,6 +2,7 @@
 //! killprocess, message, nowait, quit, regdll, run, service, stringreplace,
 //! symlink, systemrefresh, uservar.
 
+use crate::util::WinCase;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::GetLastError;
@@ -306,7 +307,7 @@ const SERVICE_INTERACTIVE_PROCESS: u32 = 0x100;
 
 /// `type=` of `sc create` as the service type of the Service Control Manager.
 fn service_type(name: &str) -> Option<u32> {
-    Some(match name.to_lowercase().as_str() {
+    Some(match name.lower().as_str() {
         "own" => SERVICE_WIN32_OWN_PROCESS,
         "share" => SERVICE_WIN32_SHARE_PROCESS,
         "interact own" => SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS,
@@ -394,7 +395,7 @@ fn scm_do(name: &str, flag: &str, file: &str, typ: &str) -> Result<(), u32> {
 
 pub fn service(ctx: &mut Ctx, args: &[String]) {
     let name = ctx.expand(arg(args, 0));
-    let flag = ctx.expand(arg(args, 1)).trim().to_lowercase();
+    let flag = ctx.expand(arg(args, 1)).trim().lower();
     let file = ctx.expand(arg(args, 2));
     let mut typ = ctx.expand(arg(args, 3));
     if is_null(&typ) || typ.is_empty() {

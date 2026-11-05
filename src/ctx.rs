@@ -10,7 +10,7 @@ use crate::ini::IniDoc;
 use crate::{crypto, ipc, reg, sys, ui, util};
 
 pub const PROGRAM_NAME: &str = "gaP: great! another Portabilizer";
-pub const PROGRAM_VERSION: &str = "2.1.3.0";
+pub const PROGRAM_VERSION: &str = "2.1.4.0";
 
 /// Names of the shell folders accepted as `%Name%` (order of the original).
 /// (name, fallback CSIDL, is_HKLM)
@@ -159,11 +159,11 @@ impl Logger {
             _ => 0,
         };
         let now = Instant::now();
-        let gap = now.duration_since(self.last.replace(now)).as_secs_f64();
+        let gap = seconds_text(micros(now.duration_since(self.last.replace(now))), 3);
         let t = util::local_now();
         let item = if item == 0 { String::new() } else { format!("#{}", item) };
         self.write(&format!(
-            "{:02}:{:02}:{:02}.{:03} +{:<7.3} {:<6} {:<4} {:<4} {}",
+            "{:02}:{:02}:{:02}.{:03} +{:<7} {:<6} {:<4} {:<4} {}",
             t.hour,
             t.min,
             t.sec,
@@ -177,6 +177,19 @@ impl Logger {
     }
 }
 
+/// A time in microseconds (whole numbers: the formatting of floating point is not in the program just for the log).
+fn micros(d: std::time::Duration) -> u64 {
+    d.as_secs() * 1_000_000 + u64::from(d.subsec_micros())
+}
+
+/// Microseconds as seconds with 1 or 3 decimals, rounded to the nearest ("1.235", "1.2").
+fn seconds_text(micros: u64, decimals: u32) -> String {
+    let unit = 10u64.pow(6 - decimals); // microseconds in the last decimal
+    let n = (micros + unit / 2) / unit;
+    let per_second = 10u64.pow(decimals);
+    format!("{}.{:0width$}", n / per_second, n % per_second, width = decimals as usize)
+}
+
 /// Writes the line that ends the debug log, once (when there is a log).
 pub fn log_end(code: i32) {
     if ENDED.swap(true, Ordering::Relaxed) {
@@ -185,10 +198,10 @@ pub fn log_end(code: i32) {
     let Some(path) = LOG_PATH.lock().ok().and_then(|p| p.clone()) else { return };
     let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(path) else { return };
     use std::io::Write;
-    let secs = STARTED.get().map_or(0.0, |s| s.elapsed().as_secs_f64());
+    let secs = seconds_text(STARTED.get().map_or(0, |s| micros(s.elapsed())), 1);
     let _ = writeln!(
         f,
-        "\nEND  exit={}  errors={}  warnings={}  elapsed={:.1}s",
+        "\nEND  exit={}  errors={}  warnings={}  elapsed={}s",
         code,
         ERRORS.load(Ordering::Relaxed),
         WARNINGS.load(Ordering::Relaxed),
@@ -459,4 +472,33 @@ pub fn exit_now() -> ! {
 pub fn exit_code(code: i32) -> ! {
     log_end(code);
     std::process::exit(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn times_are_written_with_the_decimals_of_the_log() {
+        assert_eq!(seconds_text(0, 3), "0.000");
+        assert_eq!(seconds_text(1_234_567, 3), "1.235");
+        assert_eq!(seconds_text(1_234_499, 3), "1.234");
+        assert_eq!(seconds_text(999_600, 3), "1.000"); // rounds up into the next second
+        assert_eq!(seconds_text(61_000_000, 3), "61.000");
+        assert_eq!(seconds_text(1_234_567, 1), "1.2");
+        assert_eq!(seconds_text(1_250_001, 1), "1.3");
+        assert_eq!(seconds_text(59_960_000, 1), "60.0");
+        assert_eq!(seconds_text(3_600_000_000, 1), "3600.0");
+    }
+
+    #[test]
+    fn the_same_text_as_the_float_formatting_it_replaces() {
+        // the values the log shows are never exact ties in binary, so the float formatting and this one agree
+        for us in [1u64, 499, 500, 12_345, 123_456, 987_654, 1_000_000, 4_321_987, 100_000_000, 7_654_321_012] {
+            let secs = Duration::from_micros(us).as_secs_f64();
+            assert_eq!(seconds_text(us, 3), format!("{:.3}", secs), "{us}");
+            assert_eq!(seconds_text(us, 1), format!("{:.1}", secs), "{us}");
+        }
+    }
 }
