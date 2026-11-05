@@ -1,6 +1,7 @@
 //! System services: OS architecture/version, administrator, processes,
 //! single instance, windows, ping, language and shell folders.
 
+use crate::util::WinCase;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -282,15 +283,85 @@ pub fn launch(cmdline: &str, cwd: &str, show: u16, wait: bool) -> Result<(), u32
     }
 }
 
-/// Runs `exe args…` without a window and waits (replaces `RunWait(@ComSpec & " /C …")`).
+/// One argument of a command line, quoted the way the C runtime of Windows reads it back (the rules `CommandLineToArgvW`
+/// documents): an argument with a space, a tab or a quote, and an empty one, goes between quotes; a quote is escaped with
+/// a backslash, and the backslashes before it (or before the closing quote) are doubled.
+fn quote_arg(arg: &str, out: &mut String) {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
+        out.push_str(arg);
+        return;
+    }
+    out.push('"');
+    let mut backslashes = 0;
+    for c in arg.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat_n('\\', backslashes));
+                out.push(c);
+                backslashes = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+}
+
+/// `"exe" arg arg…`: the executable always between quotes, each argument quoted by `quote_arg`.
+fn command_line(exe: &str, args: &[&str]) -> String {
+    let mut cl = format!("\"{}\"", exe);
+    for a in args {
+        cl.push(' ');
+        quote_arg(a, &mut cl);
+    }
+    cl
+}
+
+/// Runs `cmdline` (the quoted executable and its arguments, as `launch` takes it), waits for it to end and gives its
+/// exit code. `Err` is the Windows error of the start. The process gets no window when `no_window` is set; it inherits
+/// the environment but not the handles of gaP. It is not added to the processes gaP started (`launch` does that): it is
+/// a helper that ends before gaP goes on.
+fn run_wait(cmdline: &str, cwd: &str, no_window: bool) -> Result<u32, u32> {
+    unsafe {
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let mut cl = w(cmdline);
+        let cwd_w = w(cwd);
+        let flags = CREATE_UNICODE_ENVIRONMENT | if no_window { CREATE_NO_WINDOW } else { 0 };
+        let ok = CreateProcessW(
+            null(), cl.as_mut_ptr(), null(), null(), 0, flags,
+            null(), if cwd.is_empty() { null() } else { cwd_w.as_ptr() }, &si, &mut pi,
+        );
+        if ok == 0 {
+            return Err(GetLastError());
+        }
+        CloseHandle(pi.hThread);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        let mut code = 1u32;
+        if GetExitCodeProcess(pi.hProcess, &mut code) == 0 {
+            code = 1;
+        }
+        CloseHandle(pi.hProcess);
+        Ok(code)
+    }
+}
+
+/// Runs `exe args…` without a window and waits (replaces `RunWait(@ComSpec & " /C …")`). `true` = it started and
+/// ended with the exit code 0.
 pub fn run_hidden_wait(exe: &str, args: &[&str]) -> bool {
-    use std::os::windows::process::CommandExt;
-    std::process::Command::new(exe)
-        .args(args)
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    run_wait(&command_line(exe, args), "", true) == Ok(0)
+}
+
+/// Runs `cmdline` in `cwd` and waits; the exit code is not looked at. `Err` is the Windows error of the start.
+/// (`batch`: cmd.exe, with the path of the file already between its own quotes.)
+pub fn run_command_wait(cmdline: &str, cwd: &str, no_window: bool) -> Result<(), u32> {
+    run_wait(cmdline, cwd, no_window).map(|_| ())
 }
 
 /// Architecture of this process (gaP itself): "x86" or "x64".
@@ -374,11 +445,11 @@ pub fn window_title_exists(part: &str) -> bool {
 /// finds the programs that have no window, such as the ones that live in the notification area.
 pub fn process_exists(name: &str) -> bool {
     let me = std::process::id();
-    let want = name.trim().to_lowercase();
+    let want = name.trim().lower();
     let want = want.strip_suffix(".exe").unwrap_or(&want).to_string();
     !want.is_empty()
         && list_processes().iter().any(|p| {
-            let n = p.name.to_lowercase();
+            let n = p.name.lower();
             p.pid != me && n.strip_suffix(".exe").unwrap_or(&n) == want
         })
 }
@@ -535,5 +606,94 @@ pub fn fs_name(path: &str) -> String {
         } else {
             String::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The arguments of a command line as Windows reads them (`CommandLineToArgvW`).
+    fn argv(cl: &str) -> Vec<String> {
+        unsafe {
+            let wide = w(cl);
+            let mut n = 0i32;
+            let p = CommandLineToArgvW(wide.as_ptr(), &mut n);
+            assert!(!p.is_null());
+            let list = (0..n as usize)
+                .map(|i| {
+                    let s = *p.add(i);
+                    let mut len = 0;
+                    while *s.add(len) != 0 {
+                        len += 1;
+                    }
+                    String::from_utf16_lossy(std::slice::from_raw_parts(s, len))
+                })
+                .collect();
+            LocalFree(p as _);
+            list
+        }
+    }
+
+    #[test]
+    fn arguments_are_read_back_as_they_were_written() {
+        let args = [
+            "plain",
+            "with space",
+            "",
+            "tab\there",
+            "say \"hi\"",
+            "C:\\dir with space\\",
+            "C:\\dir\\",
+            "a\\\"b",
+            "a\\\\\"b",
+            "\\\\server\\share name\\",
+            "ação é",
+            "HKCU\\Software\\My App",
+        ];
+        let exe = "C:\\Program Files\\x\\tool.exe";
+        let mut want = vec![exe.to_string()];
+        want.extend(args.iter().map(|a| a.to_string()));
+        assert_eq!(argv(&command_line(exe, &args)), want);
+    }
+
+    #[test]
+    fn plain_arguments_are_not_quoted() {
+        assert_eq!(command_line("C:\\a.exe", &["import", "C:\\x\\y.reg", "/reg:32"]), "\"C:\\a.exe\" import C:\\x\\y.reg /reg:32");
+    }
+
+    #[test]
+    fn the_exit_code_is_given_back() {
+        let cmd = system32("cmd.exe");
+        assert_eq!(run_wait(&format!("\"{}\" /C exit 3", cmd), "", true), Ok(3));
+        assert_eq!(run_wait(&format!("\"{}\" /C exit 0", cmd), "", true), Ok(0));
+    }
+
+    #[test]
+    fn run_hidden_wait_is_true_only_for_exit_code_0() {
+        let reg = system32("reg.exe");
+        assert!(run_hidden_wait(&reg, &["query", "HKCU\\Software"]));
+        // reg.exe ends with 1 when the key is not there; the program did start, so this must still be false
+        assert!(!run_hidden_wait(&reg, &["query", "HKCU\\Software\\gap_test_this_key_does_not_exist_8412"]));
+    }
+
+    #[test]
+    fn a_program_that_does_not_exist_is_an_error() {
+        assert!(run_wait("\"C:\\gap_test_no_such_folder\\no_such.exe\"", "", true).is_err());
+        assert!(!run_hidden_wait("C:\\gap_test_no_such_folder\\no_such.exe", &[]));
+    }
+
+    #[test]
+    fn the_working_folder_is_used() {
+        let dir = std::env::temp_dir().join(format!("gap_test_cwd_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cmd = system32("cmd.exe");
+        let out = dir.join("where.txt");
+        // "cd" prints the current folder; the file is written there by a relative name
+        let cl = format!("\"{}\" /C cd > where.txt", cmd);
+        assert_eq!(run_wait(&cl, &dir.to_string_lossy(), true), Ok(0));
+        let printed = std::fs::read_to_string(&out).unwrap();
+        assert!(util::eq_ic(printed.trim(), &dir.to_string_lossy()), "{printed:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

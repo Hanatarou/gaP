@@ -1,6 +1,6 @@
 [Revision]
 
-This file is Revision 6 from 03/NOV/2026 (gaP 2.1.3.0, the Rust port; the
+This file is Revision 6 from 03/NOV/2026 (gaP 2.1.4.0, the Rust port; the
 source code and the releases are at the gaP repository, #15). Revision 4,
 from 18/JUL/2015, was the last one of the AutoIt version.
 

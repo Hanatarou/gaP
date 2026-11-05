@@ -2,6 +2,7 @@
 //! regkey, regvalue, (regkey), (regvalue), ->regkey, <-regkey, ->regvalue,
 //! <-regvalue, +regkey, +regvalue, -regkey, -regvalue, regexport, regimport.
 
+use crate::util::WinCase;
 use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND};
 
 use crate::ctx::{Ctx, Prog};
@@ -59,7 +60,7 @@ fn settings_reg(ctx: &mut Ctx, arg_val: &str) -> String {
         let e = ctx.expand(arg_val);
         util::path_full(&e, &ctx.script_dir)
     };
-    if !f.to_lowercase().ends_with(".reg") {
+    if !f.lower().ends_with(".reg") {
         if f.ends_with('\\') {
             f.push_str("settings.reg");
         } else {
@@ -82,7 +83,7 @@ pub fn copy_key(ctx: &Ctx, src: &str, tgt: &str, mv: bool, view: View) -> bool {
         ctx.msg(&format!("Refusing to move \"{}\" (a registry root or a whole Software, Classes or Wow6432Node key).", src));
         return false;
     }
-    if tgt.to_lowercase().starts_with(&format!("{}\\", src.to_lowercase())) {
+    if tgt.lower().starts_with(&format!("{}\\", src.lower())) {
         ctx.msg(&format!("Registry operation skipped: \"{}\" is inside \"{}\".", tgt, src));
         return false;
     }
@@ -229,7 +230,7 @@ pub fn plus_regvalue(ctx: &mut Ctx, args: &[String]) {
 }
 
 fn is_user_or_machine(root: &str) -> bool {
-    matches!(root.to_uppercase().as_str(), "HKCU" | "HKEY_CURRENT_USER" | "HKLM" | "HKEY_LOCAL_MACHINE")
+    matches!(root.upper().as_str(), "HKCU" | "HKEY_CURRENT_USER" | "HKLM" | "HKEY_LOCAL_MACHINE")
 }
 
 /// A key whose deletion would take the settings of every program of the user or of the computer: a root, or the
@@ -532,8 +533,8 @@ fn reg_escape(name: &str) -> String {
 fn filter_single_value(file: &str, key: &str, name: &str) -> Option<bool> {
     let (text, enc) = util::read_text(file)?;
     let mut kept = 0;
-    let want_key = key.to_lowercase();
-    let want_val = format!("\"{}\"=", reg_escape(name)).to_lowercase();
+    let want_key = key.lower();
+    let want_val = format!("\"{}\"=", reg_escape(name)).lower();
     let mut out = String::new();
     let (mut in_key, mut keep_cont) = (false, false);
     let mut header_done = false;
@@ -554,7 +555,7 @@ fn filter_single_value(file: &str, key: &str, name: &str) -> Option<bool> {
         if t.starts_with('[') && t.ends_with(']') {
             // [HKEY_X\path] -> compare without the root
             let inner = &t[1..t.len() - 1];
-            let rest = inner.split_once('\\').map(|x| x.1).unwrap_or("").to_lowercase();
+            let rest = inner.split_once('\\').map(|x| x.1).unwrap_or("").lower();
             let want_rest = want_key.split_once('\\').map(|x| x.1).unwrap_or("").to_string();
             in_key = rest == want_rest;
             keep_cont = false;
@@ -564,7 +565,7 @@ fn filter_single_value(file: &str, key: &str, name: &str) -> Option<bool> {
             }
             continue;
         }
-        if in_key && (keep_cont || t.to_lowercase().starts_with(&want_val)) {
+        if in_key && (keep_cont || t.lower().starts_with(&want_val)) {
             if !keep_cont {
                 kept += 1;
             }
@@ -583,7 +584,7 @@ fn filter_single_value(file: &str, key: &str, name: &str) -> Option<bool> {
 
 /// The key or value as `unsaved` names it: the text without the backslash that marks a key, in lower case.
 fn unsaved_id(spec: &str) -> String {
-    spec.trim_end_matches('\\').to_lowercase()
+    spec.trim_end_matches('\\').lower()
 }
 
 /// `spec` is a key or value whose export failed in this run, so its AFTER steps must leave it as it is.

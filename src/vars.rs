@@ -2,6 +2,7 @@
 //! (encrypted text), `%ShellFolder%`, `%ENVIRONMENT_VARIABLE%` and escapes
 //! `<{` and `<}`.
 
+use crate::util::WinCase;
 use crate::ctx::{exit_code, Ctx, EXIT_CANCELLED, EXIT_CONFIG, FUNC_MACROS, SHELL_FOLDERS};
 use crate::{checks, crypto, sys, ui, util};
 
@@ -201,12 +202,12 @@ impl Ctx {
             "LANG" => sys::locale().map(|(_, lang, _)| lang).unwrap_or_else(|| "-1".into()),
             "LOCALE" => match sys::locale() {
                 // "en-US" -> "EN"
-                Some((n, _, _)) => n.split('-').next().unwrap_or(&n).to_uppercase(),
+                Some((n, _, _)) => n.split('-').next().unwrap_or(&n).upper(),
                 None => "-1".into(),
             },
             "LOCALENAME" => sys::locale().map(|(n, _, _)| n).unwrap_or_else(|| "-1".into()),
             "LOCALENAME_SHORT" => match sys::locale() {
-                Some((n, _, _)) => n.split('-').next().unwrap_or(&n).to_lowercase(),
+                Some((n, _, _)) => n.split('-').next().unwrap_or(&n).lower(),
                 None => "-1".into(),
             },
             "COUNTRY" => sys::locale().map(|(_, _, country)| country).unwrap_or_else(|| "-1".into()),

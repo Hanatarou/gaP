@@ -6,6 +6,18 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
     }
+    // The texts that gaP carries (the help, the template of the .ini and the license) are stored deflated: this is
+    // the half that compresses, src/embedded.rs is the one that inflates. They are compressed again at every build, so
+    // a text that is edited is never out of date.
+    {
+        let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+        for (src, name) in [("res/gaP_Help.txt", "gaP_Help.z"), ("res/gaP.ini", "gaP.ini.z"), ("LICENSE", "LICENSE.z")] {
+            println!("cargo:rerun-if-changed={src}");
+            let data = std::fs::read(root.join(src)).unwrap();
+            std::fs::write(out.join(name), miniz_oxide::deflate::compress_to_vec(&data, 10)).unwrap();
+        }
+    }
     println!("cargo:rerun-if-changed=res/resources.rc");
     println!("cargo:rerun-if-changed=res/icon.ico");
     println!("cargo:rerun-if-changed=res/gap.manifest");

@@ -3,6 +3,7 @@
 //! -dir, -file, attributes, batch, date, keeponly, replace, replaceline,
 //! regmerge.
 
+use crate::util::WinCase;
 use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 
@@ -19,7 +20,7 @@ use util::{arg, eq_ic, is_null, Enc, Kind};
 // ---------------------------------------------------------- protections
 
 fn norm_cmp(p: &str) -> String {
-    util::trim_trailing_sep(p).to_lowercase()
+    util::trim_trailing_sep(p).lower()
 }
 
 fn is_inside(child: &str, parent: &str) -> bool {
@@ -62,8 +63,8 @@ fn free_name(base: &str) -> String {
 /// `entry` is a name that `free_name` makes for the trash of `name`: `<name>.gap_del`, or that with a number after it.
 /// The wildcard that lists the candidates also matches `<name>.gap_del_old` and the like, and those are not ours.
 fn is_trash_name(name: &str, entry: &str) -> bool {
-    let base = format!("{}{}", name, TRASH).to_lowercase();
-    entry.to_lowercase().strip_prefix(&base).is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()))
+    let base = format!("{}{}", name, TRASH).lower();
+    entry.lower().strip_prefix(&base).is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Finishes what an earlier replacing move of `tgt` left when it was interrupted: the garbage of a replacement
@@ -223,7 +224,7 @@ fn parse_transfer_flags(ctx: &Ctx, flag: &str) -> (bool, bool) {
     if is_null(flag) {
         return (mv, ow);
     }
-    let lower = flag.to_lowercase();
+    let lower = flag.lower();
     let mut words = lower.split(|c: char| c.is_whitespace() || c == ',' || c == '-').filter(|w| !w.is_empty());
     while let Some(w) = words.next() {
         match w {
@@ -517,7 +518,7 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
     // Each element is one letter (C, A, R, S, H, O, T) or the whole word; anything else is reported and left out.
     const WORDS: [&str; 9] = ["archive", "compressed", "hidden", "normal", "offline", "readonly", "system", "temporary", "null"];
     let mut list: Vec<String> = Vec::new();
-    let all: Vec<String> = vals.split(',').map(|s| s.to_lowercase()).collect();
+    let all: Vec<String> = vals.split(',').map(|s| s.lower()).collect();
     for v in all.iter() {
         let one_letter = v.len() == 1 && "carshot".contains(v.as_str());
         if one_letter || WORDS.contains(&v.as_str()) {
@@ -591,7 +592,6 @@ pub fn attributes(ctx: &mut Ctx, args: &[String]) {
 // ------------------------------------------------------------------- batch
 
 pub fn batch(ctx: &mut Ctx, args: &[String]) {
-    use std::os::windows::process::CommandExt;
     // `logical` goes to cmd.exe (it runs with the architecture of the application and
     // resolves the path itself); gaP opens the file through `f`.
     let logical = {
@@ -611,20 +611,19 @@ pub fn batch(ctx: &mut Ctx, args: &[String]) {
     // `Sysnative` only exists for a 32-bit process.
     let wd = util::parent_dir(&logical);
     let cmd = sys::system32_for(ctx.app_arch, "cmd.exe");
-    let mut c = std::process::Command::new(cmd);
-    c.current_dir(&wd);
-    if eq_ic(&show, "hide") {
-        // The path goes between doubled quotes, as in the original: cmd.exe drops the outer pair and keeps the
-        // inner one, which is what a path with "&" or "(x86)" needs.
-        c.raw_arg(format!("/C \"\"{}\"\"", logical)).creation_flags(0x0800_0000);
+    let (flag, no_window) = if eq_ic(&show, "hide") {
+        ("/C", true)
     } else if eq_ic(&show, "show") {
-        c.raw_arg(format!("/K \"\"{}\"\"", logical));
+        ("/K", false)
     } else {
         ctx.warn(&format!("batch \"{}\": \"{}\" is not valid, use hide or show; nothing was run", logical, show));
         return;
-    }
-    if let Err(e) = c.status() {
-        ctx.log_err(&format!("run batch \"{}\"", logical), &e);
+    };
+    // The path goes between doubled quotes, as in the original: cmd.exe drops the outer pair and keeps the inner
+    // one, which is what a path with "&" or "(x86)" needs.
+    let cmdline = format!("\"{}\" {} \"\"{}\"\"", cmd, flag, logical);
+    if let Err(e) = sys::run_command_wait(&cmdline, &wd, no_window) {
+        ctx.log_err(&format!("run batch \"{}\"", logical), &std::io::Error::from_raw_os_error(e as i32));
     }
 }
 
@@ -711,7 +710,7 @@ pub fn date(ctx: &mut Ctx, args: &[String]) {
             ctx.log_err(&format!("date \"{}\": open the file", f), &std::io::Error::last_os_error());
             return;
         }
-        let (c, a, m): (*const FILETIME, *const FILETIME, *const FILETIME) = match kind.trim().to_lowercase().as_str() {
+        let (c, a, m): (*const FILETIME, *const FILETIME, *const FILETIME) = match kind.trim().lower().as_str() {
             "created" => (&ft, null(), null()),
             "accessed" => (null(), &ft, null()),
             _ => (null(), null(), &ft),
@@ -730,7 +729,7 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
     let filter = ctx.expand(arg(args, 1));
     let typ = ctx.expand(arg(args, 2));
     let order = ctx.expand(arg(args, 3));
-    let param = ctx.expand(arg(args, 4)).to_lowercase();
+    let param = ctx.expand(arg(args, 4)).lower();
     // A number of items that is not a whole number (or is negative) must not read as 0: that would delete everything.
     let number_text = ctx.expand(arg(args, 5));
     let number = match number_text.trim().parse::<i64>() {
@@ -796,7 +795,7 @@ pub fn keeponly(ctx: &mut Ctx, args: &[String]) {
                 "lowest" => st(|m| m.modified()).min(st(|m| m.created())).min(st(|m| m.accessed())),
                 _ => 0,
             };
-            (time, util::file_name(&p).to_lowercase(), p)
+            (time, util::file_name(&p).lower(), p)
         })
         .collect();
     keyed.sort_by(|a, b| {
