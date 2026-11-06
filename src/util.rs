@@ -289,17 +289,11 @@ pub fn has_wildcard(s: &str) -> bool {
     s.contains('*') || s.contains('?')
 }
 
-fn lc(c: char) -> char {
-    if c.is_ascii() {
-        return c.to_ascii_lowercase();
-    }
-    c.to_string().lower().chars().next().unwrap_or(c)
-}
-
 /// Windows-style wildcard (`*` and `?`), case-insensitive.
 pub fn wildcard_match(pat: &str, name: &str) -> bool {
-    let p: Vec<char> = pat.chars().map(lc).collect();
-    let n: Vec<char> = name.chars().map(lc).collect();
+    // Each text is converted once (one call to the system for the whole text, none when it is ASCII).
+    let p: Vec<char> = pat.lower().chars().collect();
+    let n: Vec<char> = name.lower().chars().collect();
     let (mut pi, mut ni) = (0usize, 0usize);
     let (mut star, mut mark) = (None::<usize>, 0usize);
     while ni < n.len() {
@@ -1156,5 +1150,17 @@ mod case_tests {
     fn the_wildcard_ignores_the_case_of_accented_letters() {
         assert!(wildcard_match("*ÇÃO.t?t", "ação.TXT"));
         assert!(!wildcard_match("*ÇÃO.t?t", "acao.TXT"));
+    }
+
+    #[test]
+    fn the_wildcard_mixes_ascii_and_accented_letters() {
+        // `?` is one letter, accented or not; `*` crosses accented letters; the case of both texts is ignored
+        assert!(wildcard_match("CORAÇ*", "Coração 2.txt"));
+        assert!(wildcard_match("cora?ão*", "CORAÇÃO.TXT"));
+        assert!(wildcard_match("?????", "ÀÉÎÕÜ"));
+        assert!(!wildcard_match("????", "ÀÉÎÕÜ"));
+        assert!(wildcard_match("*", "Ж"));
+        assert!(wildcard_match("ж*", "ЖИВ"));
+        assert!(!wildcard_match("CORAÇ", "Coração"));
     }
 }

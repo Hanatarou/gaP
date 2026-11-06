@@ -56,6 +56,8 @@ thread_local! {
     static LINK: Cell<HWND> = const { Cell::new(null_mut()) };
     static BRUSH_OUT: Cell<HBRUSH> = const { Cell::new(null_mut()) };
     static LICENSE_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    /// The output field shows the error message of an encryption that Windows could not do (and not encrypted text).
+    static ENCRYPT_ERROR: Cell<bool> = const { Cell::new(false) };
 }
 
 fn get_text(h: HWND) -> String {
@@ -84,22 +86,53 @@ fn close_gui() -> ! {
 
 // ----------------------------------------------------------------- -crypt
 
+/// The font of the output field when it shows an error: the one of the window, in bold.
+unsafe fn bold_font() -> HFONT {
+    static FONT: OnceLock<usize> = OnceLock::new();
+    *FONT.get_or_init(|| {
+        let normal = ui::gui_font();
+        let mut lf: LOGFONTW = std::mem::zeroed();
+        if GetObjectW(normal as _, std::mem::size_of::<LOGFONTW>() as i32, &mut lf as *mut _ as *mut _) == 0 {
+            return normal as usize;
+        }
+        lf.lfWeight = 700;
+        let f = CreateFontIndirectW(&lf);
+        if f.is_null() {
+            normal as usize
+        } else {
+            f as usize
+        }
+    }) as HFONT
+}
+
 fn crypt_change() {
     let pass = get_text(PASS.with(|c| c.get()));
     let input = get_text(INPUT.with(|c| c.get()));
     let sel = unsafe { SendMessageW(COMBO.with(|c| c.get()), CB_GETCURSEL_, 0, 0) };
+    let mut failed = false;
     let out = if !pass.is_empty() && !input.is_empty() {
         if sel == 1 {
             // Decrypt
             crypto::decrypt(&input, &pass).unwrap_or_default()
         } else {
-            crypto::encrypt(&input, &pass).unwrap_or_default()
+            crypto::encrypt(&input, &pass).unwrap_or_else(|| {
+                // Only when Windows can't give the cipher. The message is told apart from encrypted text (bold,
+                // red, never copied): encrypted text always starts with "!@@!0x" but it must be plain to see.
+                failed = true;
+                "ERROR: Windows could not encrypt the text.".to_string()
+            })
         }
     } else {
         String::new()
     };
+    let output = OUTPUT.with(|c| c.get());
+    let was_failed = ENCRYPT_ERROR.with(|f| f.replace(failed));
     unsafe {
-        SetWindowTextW(OUTPUT.with(|c| c.get()), w(&out).as_ptr());
+        if was_failed != failed {
+            let font = if failed { bold_font() } else { ui::gui_font() };
+            SendMessageW(output, WM_SETFONT, font as WPARAM, 1);
+        }
+        SetWindowTextW(output, w(&out).as_ptr());
     }
 }
 
@@ -115,7 +148,8 @@ unsafe extern "system" fn crypt_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
                     // The original re-read the field (CryptChange) and only copied if it was not empty.
                     crypt_change();
                     let t = get_text(OUTPUT.with(|c| c.get()));
-                    if !t.is_empty() {
+                    // an error message is not encrypted text: it is never put on the clipboard
+                    if !t.is_empty() && !ENCRYPT_ERROR.with(|f| f.get()) {
                         ui::clip_put(&t);
                     }
                 }
@@ -128,6 +162,9 @@ unsafe extern "system" fn crypt_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             let hdc = wp as HDC;
             if h == OUTPUT.with(|c| c.get()) {
                 SetBkColor(hdc, 0x00E1FFFF); // 0xFFFFE1 (RGB) as COLORREF
+                if ENCRYPT_ERROR.with(|f| f.get()) {
+                    SetTextColor(hdc, 0x0000_00C0); // dark red (RGB C00000) as COLORREF
+                }
                 return BRUSH_OUT.with(|b| b.get()) as LRESULT;
             }
             SetBkMode(hdc, TRANSPARENT as i32);

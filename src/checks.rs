@@ -390,6 +390,38 @@ pub fn multiple_init(ctx: &mut Ctx) {
 
 // ------------------------------------------------------------------ debugging
 
+/// A line of the header of the debug log: the header is a box 58 characters wide, with 2 spaces of margin inside
+/// the left border ("#  ") and 2 inside the right one ("  #"). A value that is longer (the path of the .ini, the
+/// application, the command line) goes on in more lines, each of them as wide as the box, so the border never moves.
+/// A short text is one line.
+fn box_lines(text: &str) -> Vec<String> {
+    const WIDTH: usize = 55; // characters of text between the margins
+    const INDENT: &str = "#      "; // the continuation lines are indented under the text
+    // a line break or a tab in the text would break the box too
+    let chars: Vec<char> = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let mut lines = Vec::new();
+    let (mut start, mut indent) = (0, "");
+    loop {
+        let room = WIDTH - indent.chars().count();
+        let mut end = (start + room).min(chars.len());
+        if end < chars.len() {
+            // cut after a folder separator when there is one in the second half of the line, else after a space or
+            // a dash, so a name is not split in the middle if it can be avoided
+            let half = start + room / 2;
+            let cut = |set: &[char]| chars[half..end].iter().rposition(|c| set.contains(c));
+            if let Some(i) = cut(&['\\', '/']).or_else(|| cut(&[' ', '-'])) {
+                end = half + i + 1;
+            }
+        }
+        let piece: String = chars[start..end].iter().collect();
+        lines.push(format!("{:<55}  #", format!("{}{}", indent, piece)));
+        if end == chars.len() {
+            return lines;
+        }
+        (start, indent) = (end, INDENT);
+    }
+}
+
 /// DELIBERATE: `!debug` is not in the help or in the README, and its value is not checked or reported. It is a tool
 /// for support, to be asked for when something goes wrong, not an option for everyday use; anything other than 1 is
 /// off. Do not document it or add warnings for it.
@@ -416,28 +448,32 @@ pub fn debug_log_init(ctx: &mut Ctx) {
         ctx.msg(&format!("The debug log could not be created in \"{}\". Click OK to continue without it.", path));
         return;
     };
-    let pad = |s: String| format!("{:<57}#", s);
+    let put = |s: String| {
+        for l in box_lines(&s) {
+            lg.write(&l);
+        }
+    };
     lg.write("######################gaP Log Header######################");
-    lg.write(&pad(format!(
+    put(format!(
         "#  Date(DD/MM/YYYY - HH:MM:SS): {:02}/{:02}/{:04} - {:02}:{:02}:{:02}",
         t.day, t.month, t.year, t.hour, t.min, t.sec
-    )));
-    lg.write(&pad(format!(
+    ));
+    put(format!(
         "#  gaP Version: {} ({}, PID {})",
         crate::ctx::PROGRAM_VERSION,
         sys::gap_arch(),
         std::process::id()
-    )));
-    lg.write(&pad(format!("#  Host OS: {}", sys::os_name())));
-    lg.write(&pad(format!("#  Host Architecture: {}", ctx.os_arch)));
-    lg.write(&pad(format!("#  Ini: {}", ctx.ini_path)));
-    lg.write(&pad(format!("#  Application: {} ({})", ctx.main_app.clone().unwrap_or_default(), ctx.app_arch)));
-    lg.write(&pad(format!("#  Command line: {}", ctx.cmd_raw)));
-    lg.write(&pad(format!(
+    ));
+    put(format!("#  Host OS: {}", sys::os_name()));
+    put(format!("#  Host Architecture: {}", ctx.os_arch));
+    put(format!("#  Ini: {}", ctx.ini_path));
+    put(format!("#  Application: {} ({})", ctx.main_app.clone().unwrap_or_default(), ctx.app_arch));
+    put(format!("#  Command line: {}", ctx.cmd_raw));
+    put(format!(
         "#  Administrator: {}   Read only drive: {}",
         if sys::is_admin() { "yes" } else { "no" },
         if ctx.is_readonly { "yes" } else { "no" }
-    )));
+    ));
     lg.write("######################gaP Log Header######################");
     lg.write("");
     lg.write("Columns: time, seconds since the previous line, phase, .ini item, INFO | OK | WARN | ERR | MSG, text");
@@ -732,7 +768,7 @@ pub fn wait_init(ctx: &mut Ctx) {
 
 #[cfg(test)]
 mod tests {
-    use super::{choose_segment, os_level, os_threshold, segment_arch, AppChoice};
+    use super::{box_lines, choose_segment, os_level, os_threshold, segment_arch, AppChoice};
 
     #[test]
     fn application_segment_choice() {
@@ -763,5 +799,41 @@ mod tests {
         assert!(w81 <= os_threshold("8.1").unwrap() && w10 > os_threshold("8.1").unwrap());
         // "<10" (10 or older) is met by Windows 10 and not by Windows 11
         assert!(w10 <= os_threshold("10").unwrap() && w11 > os_threshold("10").unwrap());
+    }
+    #[test]
+    fn the_log_header_keeps_its_border() {
+        // a short text is one line with the same margin on both sides
+        assert_eq!(box_lines("#  Host Architecture: x64"), vec![format!("{:<55}  #", "#  Host Architecture: x64")]);
+        // a long path goes on in more lines and every line is as wide as the box, with the margin at the end
+        let ini = format!("#  Ini: C:\\Users\\Central\\{}\\Teste.ini", "Pasta muito longa com acentuação ".repeat(6));
+        let lines = box_lines(&ini);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|l| l.chars().count() == 58 && l.ends_with("  #")));
+        // nothing is lost: the pieces put together are the text
+        let joined: String = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let body = &l[..l.len() - 1];
+                let body = if i > 0 { body.strip_prefix("#      ").unwrap() } else { body };
+                body.trim_end().to_string()
+            })
+            .collect();
+        assert_eq!(joined.replace(' ', ""), ini.replace(' ', ""));
+        // exactly one line at the limit, two just over it
+        assert_eq!(box_lines(&"x".repeat(55)).len(), 1);
+        assert_eq!(box_lines(&"x".repeat(56)).len(), 2);
+        // the text never touches the right border
+        assert!(box_lines(&"x".repeat(55))[0].ends_with("x  #"));
+        // a line break in a command line does not break the box
+        assert!(box_lines("#  Command line: a\r\nb\tc").iter().all(|l| !l.contains(['\r', '\n', '\t'])));
+        // an empty value is still one line
+        assert_eq!(box_lines("#  Command line: ").len(), 1);
+        // the cut is after a folder separator when there is one: the name of the file is not split
+        let path = "#  Ini: C:\\Users\\Central\\Desktop\\uma pasta com um nome bem comprido\\Teste.ini";
+        let lines = box_lines(path);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].trim_end_matches([' ', '#']).ends_with('\\'));
+        assert!(lines[1].contains("Teste.ini"));
     }
 }
